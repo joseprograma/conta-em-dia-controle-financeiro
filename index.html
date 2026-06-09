@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conta em Dia | Controle Financeiro</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <section class="auth-shell" id="authShell">
+    <div class="auth-card">
+      <div class="auth-copy">
+        <span class="tag">Acesso protegido</span>
+        <h1>Conta em Dia</h1>
+        <p>Entre com e-mail ou número válido e use uma senha com no mínimo 6 caracteres.</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" id="tabEntrar" onclick="trocarAbaAuth('entrar')">Entrar</button>
+        <button type="button" class="auth-tab" id="tabCadastrar" onclick="trocarAbaAuth('cadastrar')">Criar acesso</button>
+      </div>
+
+      <form id="formEntrar" class="auth-form">
+        <div class="form-group">
+          <label for="loginEntrar">E-mail ou número</label>
+          <input type="text" id="loginEntrar" placeholder="controlefinanceirosistema@gmail.com" autocomplete="username" />
+        </div>
+
+        <div class="form-group">
+          <label for="senhaEntrar">Senha</label>
+          <input type="password" id="senhaEntrar" placeholder="Mínimo de 6 caracteres" autocomplete="current-password" />
+        </div>
+
+        <p class="auth-message" id="mensagemEntrar"></p>
+        <button type="submit" class="btn btn-primary">Entrar no sistema</button>
+      </form>
+
+      <form id="formCadastrar" class="auth-form auth-hidden">
+        <div class="form-group">
+          <label for="loginCadastro">Criar login</label>
+          <input type="text" id="loginCadastro" placeholder="Use e-mail ou número válido" autocomplete="username" />
+        </div>
+
+        <div class="form-group">
+          <label for="senhaCadastro">Criar senha</label>
+          <input type="password" id="senhaCadastro" placeholder="Mínimo de 6 caracteres" autocomplete="new-password" />
+        </div>
+
+        <div class="form-group">
+          <label for="senhaCadastroConfirmacao">Confirmar senha</label>
+          <input type="password" id="senhaCadastroConfirmacao" placeholder="Repita a senha" autocomplete="new-password" />
+        </div>
+
+        <p class="auth-message" id="mensagemCadastro"></p>
+        <button type="submit" class="btn btn-primary">Salvar acesso</button>
+      </form>
+    </div>
+  </section>
+
+  <div class="app app-hidden" id="appShell">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+      <div class="brand">
+        <div class="logo">CE</div>
+        <div>
+          <h1>Conta em Dia</h1>
+          <p>Controle simples das contas do mês</p>
+        </div>
+      </div>
+
+      <nav class="menu">
+        <a href="#painel" class="active">Painel</a>
+        <a href="#lancamento">Novo lançamento</a>
+        <a href="#ganhos">Ganhos</a>
+        <a href="#gastos">Gastos</a>
+        <a href="#resumo">Resumo</a>
+      </nav>
+      </div>
+
+      <div class="sidebar-bottom">
+      <div class="sidebar-card">
+        <strong>Dica do sistema</strong>
+        <p>Registre o valor previsto e o valor realizado. A diferença será calculada automaticamente.</p>
+      </div>
+      <button type="button" class="btn btn-light btn-logout" onclick="sairDoSistema()">Sair</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar" id="painel">
+        <div>
+          <span class="tag">Sistema financeiro pessoal</span>
+          <h2>Planilha de orçamento mensal</h2>
+          <p>Controle ganhos, compras, energia, água, internet, alimentação, dívidas e todos os gastos do mês.</p>
+        </div>
+
+        <div class="periodo-box">
+          <label for="mesFiltro">Mês</label>
+          <select id="mesFiltro"></select>
+
+          <label for="anoFiltro">Ano</label>
+          <input type="number" id="anoFiltro" min="2024" max="2100" />
+
+          <button type="button" class="btn btn-primary" onclick="atualizarPeriodo()">Atualizar</button>
+        </div>
+      </header>
+
+      <section class="cards">
+        <article class="card success">
+          <span>Receita prevista</span>
+          <strong id="totalReceitaPrevista">R$ 0,00</strong>
+          <small>Ganhos esperados no mês</small>
+        </article>
+
+        <article class="card success-dark">
+          <span>Receita realizada</span>
+          <strong id="totalReceitaRealizada">R$ 0,00</strong>
+          <small>Ganhos que realmente entraram</small>
+        </article>
+
+        <article class="card danger">
+          <span>Despesas previstas</span>
+          <strong id="totalDespesaPrevista">R$ 0,00</strong>
+          <small>Gastos planejados</small>
+        </article>
+
+        <article class="card danger-dark">
+          <span>Despesas realizadas</span>
+          <strong id="totalDespesaRealizada">R$ 0,00</strong>
+          <small>Gastos que realmente saíram</small>
+        </article>
+      </section>
+
+      <section class="saldo-grid" id="resumo">
+        <article class="saldo-card">
+          <span>Saldo previsto</span>
+          <strong id="saldoPrevisto">R$ 0,00</strong>
+          <p>Receitas previstas menos despesas previstas.</p>
+        </article>
+
+        <article class="saldo-card destaque">
+          <span>Saldo realizado</span>
+          <strong id="saldoRealizado">R$ 0,00</strong>
+          <p>Receitas realizadas menos despesas realizadas.</p>
+        </article>
+
+        <article class="saldo-card">
+          <span>Diferença geral</span>
+          <strong id="diferencaGeral">R$ 0,00</strong>
+          <p>Comparação entre previsto e realizado.</p>
+        </article>
+      </section>
+
+      <section class="insights-grid">
+        <article class="panel insight-panel">
+          <div class="panel-header">
+            <div>
+              <span class="tag">Resultado do mês</span>
+              <h3>Situação final</h3>
+              <p id="mensagemResultado">O sistema vai mostrar aqui se os ganhos foram maiores que as despesas.</p>
+            </div>
+          </div>
+
+          <div class="status-box" id="statusResultado">
+            <strong id="tituloResultado">Aguardando lançamentos</strong>
+            <p id="detalheResultado">Cadastre ganhos e gastos para ver a leitura automática do mês.</p>
+          </div>
+        </article>
+
+        <article class="panel insight-panel">
+          <div class="panel-header">
+            <div>
+              <span class="tag">Planejamento</span>
+              <h3>Sugestões para não ficar no vermelho</h3>
+              <p>Recomendações automáticas com base nos seus lançamentos reais.</p>
+            </div>
+          </div>
+
+          <div id="listaSugestoes" class="suggestion-list"></div>
+        </article>
+      </section>
+
+      <section class="panel" id="fechamentoMensal">
+        <div class="panel-header">
+          <div>
+            <span class="tag">Fechamento automático</span>
+            <h3>Resumo do mês anterior</h3>
+            <p>No dia 1, o sistema mostra onde você ganhou mais e onde gastou mais no mês passado.</p>
+          </div>
+        </div>
+
+        <div id="resumoMensalAutomatico" class="monthly-summary"></div>
+      </section>
+
+      <section class="panel" id="lancamento">
+        <div class="panel-header">
+          <div>
+            <span class="tag">Novo registro</span>
+            <h3>Cadastrar lançamento</h3>
+            <p>Adicione ganhos ou gastos da família, comércio ou pessoa física.</p>
+          </div>
+
+          <button type="button" class="btn btn-light" onclick="limparFormulario()">Limpar</button>
+        </div>
+
+        <form id="formLancamento" class="form-grid">
+          <input type="hidden" id="lancamentoId" />
+
+          <div class="form-group">
+            <label for="tipo">Tipo</label>
+            <select id="tipo" required onchange="controlarCamposPorTipo()">
+              <option value="receita">Ganho / Receita</option>
+              <option value="despesa">Gasto / Despesa</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="grupo">Grupo</label>
+            <select id="grupo" required>
+              <option value="">Selecione</option>
+            </select>
+          </div>
+
+          <div class="form-group full">
+            <label for="descricao">Descrição</label>
+            <input type="text" id="descricao" placeholder="Ex: salário, energia, feira, internet, compra no mercado" required />
+          </div>
+
+          <div class="form-group">
+            <label for="classificacao">Classificação da despesa</label>
+            <select id="classificacao">
+              <option value="">Não se aplica</option>
+              <option value="Fixa">Fixa</option>
+              <option value="Variável">Variável</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="previsto">Valor previsto</label>
+            <input type="number" id="previsto" min="0" step="0.01" placeholder="0,00" required />
+          </div>
+
+          <div class="form-group">
+            <label for="realizado">Valor realizado</label>
+            <input type="number" id="realizado" min="0" step="0.01" placeholder="0,00" required />
+          </div>
+
+          <div class="form-group">
+            <label for="data">Data</label>
+            <input type="date" id="data" required />
+          </div>
+
+          <div class="form-group full">
+            <label for="observacao">Observação</label>
+            <textarea id="observacao" rows="3" placeholder="Ex: conta paga com atraso, compra parcelada, pagamento em dinheiro"></textarea>
+          </div>
+
+          <div class="form-actions full">
+            <button type="submit" class="btn btn-primary">Salvar lançamento</button>
+            <button type="button" class="btn btn-secondary" onclick="exportarCSV()">Exportar CSV</button>
+            <button type="button" class="btn btn-danger" onclick="apagarTudo()">Apagar tudo</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" id="ganhos">
+        <div class="panel-header">
+          <div>
+            <span class="tag">Receitas</span>
+            <h3>Ganhos do mês</h3>
+            <p>Salário, diária, venda, benefício, pix recebido e outras entradas.</p>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Grupo</th>
+                <th>Descrição</th>
+                <th>Previsto</th>
+                <th>Realizado</th>
+                <th>Diferença</th>
+                <th>Data</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tabelaReceitas"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="2">Total</td>
+                <td id="rodapeReceitaPrevista">R$ 0,00</td>
+                <td id="rodapeReceitaRealizada">R$ 0,00</td>
+                <td id="rodapeReceitaDiferenca">R$ 0,00</td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="gastos">
+        <div class="panel-header">
+          <div>
+            <span class="tag">Despesas e saídas</span>
+            <h3>Gastos do mês</h3>
+            <p>Energia, água, internet, compras, alimentação, transporte, dívidas e despesas variáveis.</p>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Grupo</th>
+                <th>Descrição</th>
+                <th>Tipo</th>
+                <th>Previsto</th>
+                <th>Realizado</th>
+                <th>Diferença</th>
+                <th>Data</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tabelaDespesas"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3">Total</td>
+                <td id="rodapeDespesaPrevista">R$ 0,00</td>
+                <td id="rodapeDespesaRealizada">R$ 0,00</td>
+                <td id="rodapeDespesaDiferenca">R$ 0,00</td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
