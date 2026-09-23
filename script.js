@@ -1,7 +1,12 @@
-const STORAGE_KEY = "conta_em_dia_lancamentos";
-const SESSION_STORAGE_KEY = "conta_em_dia_sessao";
-const FIXED_LOGIN = "controlefinanceirosistema@gmail.com";
-const FIXED_PASSWORD = "sistema1";
+const LEGACY_STORAGE_KEY = "conta_em_dia_lancamentos";
+const LEGACY_SESSION_KEY = "conta_em_dia_sessao";
+const CONTAS_STORAGE_KEY = "conta_em_dia_contas";
+const TENTATIVAS_STORAGE_KEY = "conta_em_dia_tentativas";
+const SESSION_STORAGE_KEY = "conta_em_dia_sessao_ativa";
+const PBKDF2_ITERACOES = 310000;
+const SENHA_MINIMA = 8;
+const MAX_TENTATIVAS = 5;
+const BLOQUEIO_MS = 60 * 1000;
 
 const gruposReceita = [
   "Salario",
@@ -35,95 +40,255 @@ const gruposDespesa = [
 let lancamentos = [];
 let mesAtual = new Date().getMonth() + 1;
 let anoAtual = new Date().getFullYear();
+let sessao = null;
+let filaSalvamento = Promise.resolve();
 
 const authShell = document.getElementById("authShell");
 const appShell = document.getElementById("appShell");
 const formEntrar = document.getElementById("formEntrar");
+const formCadastrar = document.getElementById("formCadastrar");
 const tabEntrar = document.getElementById("tabEntrar");
 const tabCadastrar = document.getElementById("tabCadastrar");
 const mesFiltro = document.getElementById("mesFiltro");
 const anoFiltro = document.getElementById("anoFiltro");
 const formLancamento = document.getElementById("formLancamento");
+const arquivoBackup = document.getElementById("arquivoBackup");
 
-function iniciarSistema() {
+async function iniciarSistema() {
   configurarAutenticacao();
   preencherMeses();
   anoFiltro.value = anoAtual;
-  carregarLancamentos();
   controlarCamposPorTipo();
   definirDataHoje();
-  aplicarEstadoAutenticacao();
 
   if (formLancamento) {
     formLancamento.addEventListener("submit", salvarLancamento);
   }
+
+  if (arquivoBackup) {
+    arquivoBackup.addEventListener("change", importarBackup);
+  }
+
+  if (!criptografiaDisponivel()) {
+    trocarAbaAuth("entrar");
+    definirMensagemAuth("mensagemEntrar", "Este navegador nao suporta a protecao do sistema. Abra pelo Chrome, Edge ou Firefox atualizado, em endereco https.");
+    return;
+  }
+
+  await restaurarSessao();
+  aplicarEstadoAutenticacao();
 }
+
+/* ---------- Criptografia ---------- */
+
+function criptografiaDisponivel() {
+  return Boolean(window.crypto && window.crypto.subtle);
+}
+
+function paraBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let texto = "";
+  bytes.forEach((byte) => { texto += String.fromCharCode(byte); });
+  return btoa(texto);
+}
+
+function deBase64(base64) {
+  const texto = atob(base64);
+  const bytes = new Uint8Array(texto.length);
+  for (let i = 0; i < texto.length; i += 1) {
+    bytes[i] = texto.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function bytesAleatorios(tamanho) {
+  return crypto.getRandomValues(new Uint8Array(tamanho));
+}
+
+async function gerarIdConta(email) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function derivarChave(senha, salt, iteracoes) {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(senha),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: iteracoes, hash: "SHA-256" },
+    material,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function cifrar(chave, dados) {
+  const iv = bytesAleatorios(12);
+  const conteudo = new TextEncoder().encode(JSON.stringify(dados));
+  const cifrado = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, chave, conteudo);
+  return { iv: paraBase64(iv), dados: paraBase64(cifrado) };
+}
+
+async function decifrar(chave, pacote) {
+  const aberto = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: deBase64(pacote.iv) },
+    chave,
+    deBase64(pacote.dados)
+  );
+  return JSON.parse(new TextDecoder().decode(aberto));
+}
+
+/* ---------- Contas locais ---------- */
+
+function lerJson(chave) {
+  try {
+    return JSON.parse(localStorage.getItem(chave)) || {};
+  } catch (erro) {
+    return {};
+  }
+}
+
+function lerContas() {
+  return lerJson(CONTAS_STORAGE_KEY);
+}
+
+function gravarContas(contas) {
+  localStorage.setItem(CONTAS_STORAGE_KEY, JSON.stringify(contas));
+}
+
+function segundosDeBloqueio(idConta) {
+  const registro = lerJson(TENTATIVAS_STORAGE_KEY)[idConta];
+  if (!registro || !registro.bloqueadoAte) return 0;
+  return Math.max(0, Math.ceil((registro.bloqueadoAte - Date.now()) / 1000));
+}
+
+function registrarFalha(idConta) {
+  const tentativas = lerJson(TENTATIVAS_STORAGE_KEY);
+  const registro = tentativas[idConta] || { falhas: 0 };
+  registro.falhas += 1;
+
+  if (registro.falhas >= MAX_TENTATIVAS) {
+    registro.falhas = 0;
+    registro.bloqueadoAte = Date.now() + BLOQUEIO_MS;
+  }
+
+  tentativas[idConta] = registro;
+  localStorage.setItem(TENTATIVAS_STORAGE_KEY, JSON.stringify(tentativas));
+}
+
+function limparFalhas(idConta) {
+  const tentativas = lerJson(TENTATIVAS_STORAGE_KEY);
+  delete tentativas[idConta];
+  localStorage.setItem(TENTATIVAS_STORAGE_KEY, JSON.stringify(tentativas));
+}
+
+async function iniciarSessao(idConta, email, chave) {
+  sessao = { idConta, email, chave };
+  const chaveBruta = await crypto.subtle.exportKey("raw", chave);
+  // sessionStorage some quando a aba e fechada: o login nao fica aberto no aparelho.
+  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+    idConta,
+    email,
+    chave: paraBase64(chaveBruta)
+  }));
+}
+
+async function restaurarSessao() {
+  localStorage.removeItem(LEGACY_SESSION_KEY);
+
+  try {
+    const salvo = JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY));
+    if (!salvo) return;
+
+    const conta = lerContas()[salvo.idConta];
+    if (!conta) throw new Error("Conta inexistente");
+
+    const chave = await crypto.subtle.importKey(
+      "raw",
+      deBase64(salvo.chave),
+      { name: "AES-GCM" },
+      true,
+      ["encrypt", "decrypt"]
+    );
+
+    lancamentos = await decifrar(chave, conta.cofre);
+    sessao = { idConta: salvo.idConta, email: salvo.email, chave };
+  } catch (erro) {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    sessao = null;
+    lancamentos = [];
+  }
+}
+
+/* ---------- Tela de acesso ---------- */
 
 function configurarAutenticacao() {
   if (formEntrar) {
     formEntrar.addEventListener("submit", entrarNoSistema);
   }
 
-  if (tabCadastrar) {
-    tabCadastrar.classList.add("auth-hidden");
+  if (formCadastrar) {
+    formCadastrar.addEventListener("submit", criarAcesso);
   }
-
-  trocarAbaAuth("entrar");
-  definirMensagemAuth("mensagemEntrar", "Use o e-mail liberado com a senha do sistema.");
 }
 
 function trocarAbaAuth(aba) {
   const entrarAtivo = aba === "entrar";
 
-  if (formEntrar) {
-    formEntrar.classList.toggle("auth-hidden", !entrarAtivo);
-  }
-
-  if (tabEntrar) {
-    tabEntrar.classList.toggle("active", entrarAtivo);
-  }
+  formEntrar.classList.toggle("auth-hidden", !entrarAtivo);
+  formCadastrar.classList.toggle("auth-hidden", entrarAtivo);
+  tabEntrar.classList.toggle("active", entrarAtivo);
+  tabCadastrar.classList.toggle("active", !entrarAtivo);
 
   limparMensagensAuth();
 }
 
 function aplicarEstadoAutenticacao() {
-  if (usuarioEstaAutenticado()) {
+  if (sessao) {
     authShell.classList.add("auth-hidden");
     appShell.classList.remove("app-hidden");
+    document.getElementById("usuarioLogado").textContent = sessao.email;
     renderizarTudo();
     return;
   }
 
   authShell.classList.remove("auth-hidden");
   appShell.classList.add("app-hidden");
-  trocarAbaAuth("entrar");
-  definirMensagemAuth("mensagemEntrar", "Use o e-mail liberado com a senha do sistema.");
-}
 
-function usuarioEstaAutenticado() {
-  return localStorage.getItem(SESSION_STORAGE_KEY) === "ativo";
+  const existeConta = Object.keys(lerContas()).length > 0;
+  trocarAbaAuth(existeConta ? "entrar" : "cadastrar");
+
+  if (!existeConta) {
+    definirMensagemAuth("mensagemCadastro", "Primeiro acesso neste aparelho: crie seu e-mail e senha.", "info");
+  }
 }
 
 function normalizarLogin(login) {
   return String(login || "").trim().toLowerCase();
 }
 
-function loginEhValido(login) {
-  const loginNormalizado = normalizarLogin(login);
-  const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginNormalizado);
-  const numeroLimpo = loginNormalizado.replace(/\D/g, "");
-  const numeroValido = numeroLimpo.length >= 8 && numeroLimpo.length <= 15;
-  return emailValido || numeroValido;
+function emailEhValido(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizarLogin(email));
 }
 
-function senhaEhValida(senha) {
-  return String(senha || "").length >= 6;
+function problemaNaSenha(senha) {
+  const texto = String(senha || "");
+  if (texto.length < SENHA_MINIMA) return `A senha precisa ter no minimo ${SENHA_MINIMA} caracteres.`;
+  if (!/[a-zA-Z]/.test(texto) || !/\d/.test(texto)) return "A senha precisa ter letras e numeros.";
+  return "";
 }
 
-function definirMensagemAuth(id, mensagem) {
+function definirMensagemAuth(id, mensagem, tipo) {
   const elemento = document.getElementById(id);
   if (elemento) {
     elemento.textContent = mensagem;
+    elemento.classList.toggle("info", tipo === "info");
   }
 }
 
@@ -132,39 +297,129 @@ function limparMensagensAuth() {
   definirMensagemAuth("mensagemCadastro", "");
 }
 
-function entrarNoSistema(event) {
+function travarFormulario(form, travado) {
+  form.querySelectorAll("button, input").forEach((campo) => {
+    campo.disabled = travado;
+  });
+}
+
+async function criarAcesso(event) {
   event.preventDefault();
 
-  const login = document.getElementById("loginEntrar").value;
+  const email = normalizarLogin(document.getElementById("loginCadastro").value);
+  const senha = document.getElementById("senhaCadastro").value;
+  const confirmacao = document.getElementById("senhaCadastroConfirmacao").value;
+
+  if (!emailEhValido(email)) {
+    definirMensagemAuth("mensagemCadastro", "Digite um e-mail valido.");
+    return;
+  }
+
+  const erroSenha = problemaNaSenha(senha);
+  if (erroSenha) {
+    definirMensagemAuth("mensagemCadastro", erroSenha);
+    return;
+  }
+
+  if (senha !== confirmacao) {
+    definirMensagemAuth("mensagemCadastro", "As senhas nao conferem.");
+    return;
+  }
+
+  const idConta = await gerarIdConta(email);
+  const contas = lerContas();
+
+  if (contas[idConta]) {
+    definirMensagemAuth("mensagemCadastro", "Este e-mail ja tem acesso neste aparelho. Use a aba Entrar.");
+    return;
+  }
+
+  travarFormulario(formCadastrar, true);
+  definirMensagemAuth("mensagemCadastro", "Protegendo seu acesso...", "info");
+
+  try {
+    const salt = bytesAleatorios(16);
+    const chave = await derivarChave(senha, salt, PBKDF2_ITERACOES);
+    const dadosIniciais = importarDadosAntigos(contas);
+
+    contas[idConta] = {
+      salt: paraBase64(salt),
+      iteracoes: PBKDF2_ITERACOES,
+      criadoEm: new Date().toISOString(),
+      cofre: await cifrar(chave, dadosIniciais)
+    };
+    gravarContas(contas);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+
+    lancamentos = dadosIniciais;
+    await iniciarSessao(idConta, email, chave);
+    formCadastrar.reset();
+    aplicarEstadoAutenticacao();
+  } catch (erro) {
+    definirMensagemAuth("mensagemCadastro", "Nao foi possivel criar o acesso. Tente novamente.");
+  } finally {
+    travarFormulario(formCadastrar, false);
+  }
+}
+
+function importarDadosAntigos(contas) {
+  // Lancamentos da versao antiga (sem criptografia) vao para a primeira conta criada.
+  if (Object.keys(contas).length > 0) return [];
+
+  try {
+    const antigos = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
+    return Array.isArray(antigos) ? antigos : [];
+  } catch (erro) {
+    return [];
+  }
+}
+
+async function entrarNoSistema(event) {
+  event.preventDefault();
+
+  const email = normalizarLogin(document.getElementById("loginEntrar").value);
   const senha = document.getElementById("senhaEntrar").value;
 
-  if (!loginEhValido(login)) {
-    definirMensagemAuth("mensagemEntrar", "Digite um e-mail valido ou um numero com 8 a 15 digitos.");
+  if (!emailEhValido(email) || !senha) {
+    definirMensagemAuth("mensagemEntrar", "Digite seu e-mail e sua senha.");
     return;
   }
 
-  if (!senhaEhValida(senha)) {
-    definirMensagemAuth("mensagemEntrar", "A senha precisa ter no minimo 6 caracteres.");
+  const idConta = await gerarIdConta(email);
+  const bloqueio = segundosDeBloqueio(idConta);
+
+  if (bloqueio > 0) {
+    definirMensagemAuth("mensagemEntrar", `Muitas tentativas. Aguarde ${bloqueio} segundos.`);
     return;
   }
 
-  const loginNormalizado = normalizarLogin(login);
-  const loginConfere = loginNormalizado === FIXED_LOGIN;
-  const senhaConfere = senha === FIXED_PASSWORD;
+  travarFormulario(formEntrar, true);
+  definirMensagemAuth("mensagemEntrar", "Verificando...", "info");
 
-  if (!loginConfere || !senhaConfere) {
-    definirMensagemAuth("mensagemEntrar", "Login ou senha invalidos.");
-    return;
+  try {
+    const conta = lerContas()[idConta];
+    if (!conta) throw new Error("Conta inexistente");
+
+    const chave = await derivarChave(senha, deBase64(conta.salt), conta.iteracoes);
+    lancamentos = await decifrar(chave, conta.cofre);
+
+    limparFalhas(idConta);
+    await iniciarSessao(idConta, email, chave);
+    formEntrar.reset();
+    aplicarEstadoAutenticacao();
+  } catch (erro) {
+    registrarFalha(idConta);
+    definirMensagemAuth("mensagemEntrar", "E-mail ou senha invalidos.");
+  } finally {
+    travarFormulario(formEntrar, false);
   }
-
-  localStorage.setItem(SESSION_STORAGE_KEY, "ativo");
-  formEntrar.reset();
-  limparMensagensAuth();
-  aplicarEstadoAutenticacao();
 }
 
 function sairDoSistema() {
-  localStorage.removeItem(SESSION_STORAGE_KEY);
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  sessao = null;
+  lancamentos = [];
+  limparFormulario();
   aplicarEstadoAutenticacao();
 }
 
@@ -195,13 +450,35 @@ function definirDataHoje() {
   document.getElementById("data").value = dataFormatada;
 }
 
-function carregarLancamentos() {
-  const dados = localStorage.getItem(STORAGE_KEY);
-  lancamentos = dados ? JSON.parse(dados) : [];
+function salvarNoNavegador() {
+  if (!sessao) return Promise.resolve();
+
+  const { idConta, chave } = sessao;
+  const copia = lancamentos.slice();
+
+  // Fila garante que gravacoes seguidas terminem na ordem certa.
+  filaSalvamento = filaSalvamento
+    .then(async () => {
+      const cofre = await cifrar(chave, copia);
+      const contas = lerContas();
+      if (!contas[idConta]) return;
+      contas[idConta].cofre = cofre;
+      gravarContas(contas);
+    })
+    .catch(() => {
+      alert("Nao foi possivel salvar os dados neste aparelho. Verifique o espaco do navegador.");
+    });
+
+  return filaSalvamento;
 }
 
-function salvarNoNavegador() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(lancamentos));
+function escaparHtml(valor) {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function gerarId() {
@@ -428,18 +705,18 @@ function renderizarReceitas(receitas) {
 
       return `
         <tr>
-          <td>${item.grupo}</td>
+          <td>${escaparHtml(item.grupo)}</td>
           <td>
-            <strong>${item.descricao}</strong>
-            ${item.observacao ? `<br><small>${item.observacao}</small>` : ""}
+            <strong>${escaparHtml(item.descricao)}</strong>
+            ${item.observacao ? `<br><small>${escaparHtml(item.observacao)}</small>` : ""}
           </td>
           <td>${formatarMoeda(item.previsto)}</td>
           <td>${formatarMoeda(item.realizado)}</td>
           <td class="${classe}">${formatarMoeda(diferenca)}</td>
           <td>${formatarData(item.data)}</td>
           <td>
-            <button class="btn btn-secondary btn-small" onclick="editarLancamento('${item.id}')">Editar</button>
-            <button class="btn btn-danger btn-small" onclick="excluirLancamento('${item.id}')">Excluir</button>
+            <button class="btn btn-secondary btn-small" onclick="editarLancamento('${escaparHtml(item.id)}')">Editar</button>
+            <button class="btn btn-danger btn-small" onclick="excluirLancamento('${escaparHtml(item.id)}')">Excluir</button>
           </td>
         </tr>
       `;
@@ -468,19 +745,19 @@ function renderizarDespesas(despesas) {
 
       return `
         <tr>
-          <td>${item.grupo}</td>
+          <td>${escaparHtml(item.grupo)}</td>
           <td>
-            <strong>${item.descricao}</strong>
-            ${item.observacao ? `<br><small>${item.observacao}</small>` : ""}
+            <strong>${escaparHtml(item.descricao)}</strong>
+            ${item.observacao ? `<br><small>${escaparHtml(item.observacao)}</small>` : ""}
           </td>
-          <td><span class="badge ${badgeClasse}">${item.classificacao}</span></td>
+          <td><span class="badge ${badgeClasse}">${escaparHtml(item.classificacao)}</span></td>
           <td>${formatarMoeda(item.previsto)}</td>
           <td>${formatarMoeda(item.realizado)}</td>
           <td class="${classe}">${formatarMoeda(diferenca)}</td>
           <td>${formatarData(item.data)}</td>
           <td>
-            <button class="btn btn-secondary btn-small" onclick="editarLancamento('${item.id}')">Editar</button>
-            <button class="btn btn-danger btn-small" onclick="excluirLancamento('${item.id}')">Excluir</button>
+            <button class="btn btn-secondary btn-small" onclick="editarLancamento('${escaparHtml(item.id)}')">Editar</button>
+            <button class="btn btn-danger btn-small" onclick="excluirLancamento('${escaparHtml(item.id)}')">Excluir</button>
           </td>
         </tr>
       `;
@@ -576,8 +853,8 @@ function renderizarAnaliseFinanceira() {
   listaSugestoes.innerHTML = sugestoes
     .map((sugestao) => `
       <div class="suggestion-item">
-        <strong>${sugestao.titulo}</strong>
-        <p>${sugestao.texto}</p>
+        <strong>${escaparHtml(sugestao.titulo)}</strong>
+        <p>${escaparHtml(sugestao.texto)}</p>
       </div>
     `)
     .join("");
@@ -673,11 +950,11 @@ function renderizarFechamentoMensal() {
     </div>
     <div class="summary-item">
       <strong>Onde ganhou mais</strong>
-      <p>${maiorReceita ? `${maiorReceita.grupo} trouxe ${formatarMoeda(maiorReceita.valor)}.` : "Nao houve ganhos cadastrados no mes anterior."}</p>
+      <p>${maiorReceita ? `${escaparHtml(maiorReceita.grupo)} trouxe ${formatarMoeda(maiorReceita.valor)}.` : "Nao houve ganhos cadastrados no mes anterior."}</p>
     </div>
     <div class="summary-item">
       <strong>Onde gastou mais</strong>
-      <p>${maiorDespesa ? `${maiorDespesa.grupo} consumiu ${formatarMoeda(maiorDespesa.valor)}.` : "Nao houve gastos cadastrados no mes anterior."}</p>
+      <p>${maiorDespesa ? `${escaparHtml(maiorDespesa.grupo)} consumiu ${formatarMoeda(maiorDespesa.valor)}.` : "Nao houve gastos cadastrados no mes anterior."}</p>
     </div>
   `;
 }
@@ -747,6 +1024,81 @@ function exportarCSV() {
   link.click();
 
   URL.revokeObjectURL(url);
+}
+
+function baixarBackup() {
+  if (lancamentos.length === 0) {
+    alert("Nao ha lancamentos para salvar no backup.");
+    return;
+  }
+
+  const conteudo = JSON.stringify({
+    sistema: "conta-em-dia",
+    versao: 1,
+    geradoEm: new Date().toISOString(),
+    lancamentos
+  }, null, 2);
+
+  const blob = new Blob([conteudo], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const hoje = new Date().toISOString().split("T")[0];
+
+  link.href = url;
+  link.download = `conta-em-dia-backup-${hoje}.json`;
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function lancamentoEhValido(item) {
+  return item
+    && typeof item.id === "string"
+    && (item.tipo === "receita" || item.tipo === "despesa")
+    && /^\d{4}-\d{2}-\d{2}$/.test(String(item.data || ""));
+}
+
+function importarBackup(event) {
+  const arquivo = event.target.files[0];
+  event.target.value = "";
+  if (!arquivo) return;
+
+  const leitor = new FileReader();
+
+  leitor.onload = () => {
+    let recebidos;
+
+    try {
+      const conteudo = JSON.parse(leitor.result);
+      recebidos = Array.isArray(conteudo) ? conteudo : conteudo.lancamentos;
+      if (!Array.isArray(recebidos)) throw new Error("Formato invalido");
+    } catch (erro) {
+      alert("Arquivo de backup invalido.");
+      return;
+    }
+
+    const validos = recebidos.filter(lancamentoEhValido);
+    const idsExistentes = new Set(lancamentos.map((item) => item.id));
+    const novos = validos
+      .filter((item) => !idsExistentes.has(item.id))
+      .map((item) => {
+        const [ano, mes] = item.data.split("-").map(Number);
+        return { ...item, previsto: Number(item.previsto) || 0, realizado: Number(item.realizado) || 0, mes, ano };
+      });
+
+    if (novos.length === 0) {
+      alert("Nenhum lancamento novo encontrado no backup.");
+      return;
+    }
+
+    if (!confirm(`Adicionar ${novos.length} lancamento(s) do backup?`)) return;
+
+    lancamentos = lancamentos.concat(novos);
+    salvarNoNavegador();
+    renderizarTudo();
+  };
+
+  leitor.readAsText(arquivo);
 }
 
 document.addEventListener("DOMContentLoaded", iniciarSistema);

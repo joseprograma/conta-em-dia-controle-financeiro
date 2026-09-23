@@ -20,7 +20,7 @@
       <div class="auth-copy">
         <span class="tag">Acesso protegido</span>
         <h1>Conta em Dia</h1>
-        <p>Entre com e-mail ou número válido e use uma senha com no mínimo 6 caracteres.</p>
+        <p>Cada pessoa cria seu próprio acesso. Seus dados ficam guardados só neste aparelho, protegidos pela sua senha.</p>
       </div>
 
       <div class="auth-tabs">
@@ -30,13 +30,13 @@
 
       <form id="formEntrar" class="auth-form">
         <div class="form-group">
-          <label for="loginEntrar">E-mail ou número</label>
-          <input type="text" id="loginEntrar" placeholder="controlefinanceirosistema@gmail.com" autocomplete="username" />
+          <label for="loginEntrar">E-mail</label>
+          <input type="email" id="loginEntrar" placeholder="seuemail@exemplo.com" autocomplete="username" />
         </div>
 
         <div class="form-group">
           <label for="senhaEntrar">Senha</label>
-          <input type="password" id="senhaEntrar" placeholder="Mínimo de 6 caracteres" autocomplete="current-password" />
+          <input type="password" id="senhaEntrar" placeholder="Sua senha" autocomplete="current-password" />
         </div>
 
         <p class="auth-message" id="mensagemEntrar"></p>
@@ -45,13 +45,13 @@
 
       <form id="formCadastrar" class="auth-form auth-hidden">
         <div class="form-group">
-          <label for="loginCadastro">Criar login</label>
-          <input type="text" id="loginCadastro" placeholder="Use e-mail ou número válido" autocomplete="username" />
+          <label for="loginCadastro">Seu e-mail</label>
+          <input type="email" id="loginCadastro" placeholder="seuemail@exemplo.com" autocomplete="username" />
         </div>
 
         <div class="form-group">
           <label for="senhaCadastro">Criar senha</label>
-          <input type="password" id="senhaCadastro" placeholder="Mínimo de 6 caracteres" autocomplete="new-password" />
+          <input type="password" id="senhaCadastro" placeholder="Mínimo de 8 caracteres, com letras e números" autocomplete="new-password" />
         </div>
 
         <div class="form-group">
@@ -60,8 +60,10 @@
         </div>
 
         <p class="auth-message" id="mensagemCadastro"></p>
-        <button type="submit" class="btn btn-primary">Salvar acesso</button>
+        <button type="submit" class="btn btn-primary">Criar meu acesso</button>
       </form>
+
+      <p class="auth-note">Guarde bem sua senha: ela é a chave que protege seus dados e não pode ser recuperada. Use o botão "Baixar backup" para não perder seus lançamentos.</p>
     </div>
   </section>
 
@@ -86,6 +88,10 @@
       </div>
 
       <div class="sidebar-bottom">
+      <div class="user-box">
+        Conectado como
+        <strong id="usuarioLogado"></strong>
+      </div>
       <div class="sidebar-card">
         <strong>Dica do sistema</strong>
         <p>Registre o valor previsto e o valor realizado. A diferença será calculada automaticamente.</p>
@@ -266,6 +272,9 @@
           <div class="form-actions full">
             <button type="submit" class="btn btn-primary">Salvar lançamento</button>
             <button type="button" class="btn btn-secondary" onclick="exportarCSV()">Exportar CSV</button>
+            <button type="button" class="btn btn-secondary" onclick="baixarBackup()">Baixar backup</button>
+            <button type="button" class="btn btn-secondary" onclick="arquivoBackup.click()">Restaurar backup</button>
+            <input type="file" id="arquivoBackup" accept="application/json,.json" hidden />
             <button type="button" class="btn btn-danger" onclick="apagarTudo()">Apagar tudo</button>
           </div>
         </form>
