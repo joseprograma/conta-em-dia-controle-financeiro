@@ -659,6 +659,18 @@ textarea:focus {
   padding: 8px 10px;
   font-size: 0.8rem;
   border-radius: 10px;
+  white-space: nowrap;
+}
+
+/* Coluna de acoes: botoes empilhados, sempre com a palavra inteira. */
+td.celula-acoes {
+  min-width: 96px;
+}
+
+td.celula-acoes .btn-small {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
 }
 
 .btn-logout {
@@ -997,10 +1009,12 @@ input[readonly] {
     padding-top: 12px;
   }
 
-  td.celula-acoes .btn {
+  td.celula-acoes .btn,
+  td.celula-acoes .btn-small {
     width: auto;
     flex: 1 1 auto;
     padding: 10px 12px;
+    margin-bottom: 0;
   }
 
   td .badge.pendente {
