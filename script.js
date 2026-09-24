@@ -1009,10 +1009,12 @@ function renderizarAnaliseFinanceira() {
     const saldoFinal = resumo.saldoFinal;
     const aReceber = resumo.faltaReceber > 0 ? ` e ${formatarMoeda(resumo.faltaReceber)} para receber` : "";
 
-    mensagemResultado.textContent = `Hoje você tem ${formatarMoeda(saldoRealizado)} em caixa (ganhos recebidos menos contas pagas).`;
+    mensagemResultado.textContent = saldoFinal < 0
+      ? `Os ganhos do mês não cobrem todas as contas do mês.`
+      : `Hoje você tem ${formatarMoeda(saldoRealizado)} (ganhos recebidos menos contas pagas).`;
 
     if (saldoFinal < 0) {
-      tituloResultado.textContent = `Vão faltar ${formatarMoeda(Math.abs(saldoFinal))} para pagar tudo`;
+      tituloResultado.textContent = `Você precisa arrumar ${formatarMoeda(Math.abs(saldoFinal))} para fechar o mês`;
       detalheResultado.textContent = `Ainda faltam ${formatarMoeda(resumo.faltaPagar)} em contas a pagar${aReceber}. Priorize as contas essenciais e renegocie o que não couber no orçamento.`;
       statusResultado.classList.add("negativo");
     } else if (saldoFinal > 0) {
@@ -1059,25 +1061,35 @@ function renderizarContaResultado(resumo) {
     return;
   }
 
-  const linha = (rotulo, valor, classe = "") => `
+  const linha = (rotulo, valor, classe = "", vermelho = valor < 0) => `
     <div class="conta-linha ${classe}">
       <span>${rotulo}</span>
-      <strong class="${valor < 0 ? "valor-negativo" : ""}">${formatarMoeda(valor)}</strong>
+      <strong class="${vermelho ? "valor-negativo" : ""}">${formatarMoeda(valor)}</strong>
     </div>
   `;
 
   const temPendencia = resumo.faltaPagar > 0 || resumo.faltaReceber > 0;
-  const linhas = [
-    linha("Ganhos recebidos", resumo.receitaRealizada),
-    linha("(−) Contas pagas", resumo.despesaRealizada),
-    linha(temPendencia ? "(=) Em caixa hoje" : "(=) Resultado do mês", resumo.saldoRealizado, temPendencia ? "subtotal" : "total")
-  ];
+  const vaiFaltar = resumo.saldoFinal < 0;
+  const totalGanhos = resumo.receitaRealizada + resumo.faltaReceber;
+  const totalContas = resumo.despesaRealizada + resumo.faltaPagar;
+  const linhas = [];
+
+  // Mostra o mes inteiro: tudo o que entra contra todas as contas (pagas e as que faltam).
+  if (resumo.faltaReceber > 0) {
+    linhas.push(linha("Ganhos já recebidos", resumo.receitaRealizada));
+    linhas.push(linha("Ganhos que faltam receber", resumo.faltaReceber));
+  }
+  linhas.push(linha("Ganhos do mês", totalGanhos, "subtotal"));
 
   if (temPendencia) {
-    if (resumo.faltaReceber > 0) linhas.push(linha("(+) Falta receber", resumo.faltaReceber));
-    if (resumo.faltaPagar > 0) linhas.push(linha("(−) Falta pagar", resumo.faltaPagar));
-    linhas.push(linha("(=) Depois de pagar tudo", resumo.saldoFinal, "total"));
+    linhas.push(linha("Contas já pagas", resumo.despesaRealizada));
+    linhas.push(linha("Contas que faltam pagar", resumo.faltaPagar));
   }
+  linhas.push(linha("(−) Total de contas do mês", totalContas, "subtotal"));
+
+  linhas.push(vaiFaltar
+    ? linha("(=) Precisa arrumar para fechar o mês", Math.abs(resumo.saldoFinal), "total", true)
+    : linha("(=) Sobra no fim do mês", resumo.saldoFinal, "total"));
 
   conta.innerHTML = linhas.join("");
 }
