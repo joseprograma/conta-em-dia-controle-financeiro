@@ -497,6 +497,51 @@ button {
   border-color: #fca5a5;
 }
 
+.conta-resultado {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.conta-resultado:empty {
+  display: none;
+}
+
+.conta-linha {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.95rem;
+}
+
+.conta-linha span {
+  color: var(--muted);
+}
+
+.conta-linha strong {
+  white-space: nowrap;
+}
+
+.conta-linha.subtotal {
+  background: #f8fafc;
+  font-weight: 700;
+}
+
+.conta-linha.subtotal span,
+.conta-linha.total span {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.conta-linha.total {
+  border-bottom: none;
+  background: #f1f5f9;
+  font-size: 1.05rem;
+}
+
 .status-box.neutro {
   background: #fef3c7;
   border-color: #fcd34d;

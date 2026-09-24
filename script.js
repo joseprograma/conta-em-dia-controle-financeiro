@@ -983,6 +983,7 @@ function renderizarAnaliseFinanceira() {
   const listaSugestoes = document.getElementById("listaSugestoes");
 
   statusResultado.classList.remove("positivo", "negativo", "neutro");
+  renderizarContaResultado(dadosPeriodo.length ? resumo : null);
 
   if (dadosPeriodo.length === 0) {
     mensagemResultado.textContent = "Cadastre os lançamentos do mês para comparar ganhos e despesas automaticamente.";
@@ -1048,6 +1049,37 @@ function renderizarAnaliseFinanceira() {
       </div>
     `)
     .join("");
+}
+
+function renderizarContaResultado(resumo) {
+  const conta = document.getElementById("contaResultado");
+
+  if (!resumo) {
+    conta.innerHTML = "";
+    return;
+  }
+
+  const linha = (rotulo, valor, classe = "") => `
+    <div class="conta-linha ${classe}">
+      <span>${rotulo}</span>
+      <strong class="${valor < 0 ? "valor-negativo" : ""}">${formatarMoeda(valor)}</strong>
+    </div>
+  `;
+
+  const temPendencia = resumo.faltaPagar > 0 || resumo.faltaReceber > 0;
+  const linhas = [
+    linha("Ganhos recebidos", resumo.receitaRealizada),
+    linha("(−) Contas pagas", resumo.despesaRealizada),
+    linha(temPendencia ? "(=) Em caixa hoje" : "(=) Resultado do mês", resumo.saldoRealizado, temPendencia ? "subtotal" : "total")
+  ];
+
+  if (temPendencia) {
+    if (resumo.faltaReceber > 0) linhas.push(linha("(+) Falta receber", resumo.faltaReceber));
+    if (resumo.faltaPagar > 0) linhas.push(linha("(−) Falta pagar", resumo.faltaPagar));
+    linhas.push(linha("(=) Depois de pagar tudo", resumo.saldoFinal, "total"));
+  }
+
+  conta.innerHTML = linhas.join("");
 }
 
 function gerarSugestoesPlanejamento(resumo, maiorReceita, maiorDespesa) {
