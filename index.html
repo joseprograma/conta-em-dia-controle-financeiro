@@ -12,7 +12,7 @@
     rel="stylesheet"
   />
 
-  <link rel="stylesheet" href="style.css?v=2026-09-24b" />
+  <link rel="stylesheet" href="style.css?v=2026-09-24d" />
 </head>
 <body>
   <section class="auth-shell" id="authShell">
@@ -20,7 +20,7 @@
       <div class="auth-copy">
         <span class="tag">Acesso protegido</span>
         <h1>Conta em Dia</h1>
-        <p>Cada pessoa cria seu próprio acesso. Seus dados ficam guardados só neste aparelho, protegidos pela sua senha.</p>
+        <p>Entre com o mesmo e-mail e senha no celular e no computador. Seus lançamentos são criptografados com a sua senha antes de sair do aparelho.</p>
       </div>
 
       <div class="auth-tabs">
@@ -60,7 +60,7 @@
         </div>
 
         <div class="auth-alerta" role="alert">
-          <strong>Atenção:</strong> não existe recuperação de senha. Se esquecer a senha, limpar os dados do navegador ou trocar de aparelho, os lançamentos serão perdidos. Faça backup com frequência.
+          <strong>Atenção:</strong> não existe recuperação de senha. Se esquecer a senha, os lançamentos não podem ser abertos por ninguém, nem por nós. Guarde a senha em local seguro e faça backup com frequência.
         </div>
 
         <p class="auth-message" id="mensagemCadastro"></p>
@@ -396,6 +396,10 @@
     </form>
   </dialog>
 
-  <script src="script.js?v=2026-09-24b"></script>
+  <script src="vendor/firebase-app-compat.js?v=11.10.0"></script>
+  <script src="vendor/firebase-auth-compat.js?v=11.10.0"></script>
+  <script src="vendor/firebase-firestore-compat.js?v=11.10.0"></script>
+  <script src="config.js?v=2026-09-24d"></script>
+  <script src="script.js?v=2026-09-24d"></script>
 </body>
 </html>

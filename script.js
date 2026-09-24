@@ -64,6 +64,9 @@ let mesAtual = new Date().getMonth() + 1;
 let anoAtual = new Date().getFullYear();
 let sessao = null;
 let filaSalvamento = Promise.resolve();
+let salvamentosPendentes = 0;
+let geracaoDados = 0;
+let nuvem = null;
 let ultimaAtividade = Date.now();
 
 const authShell = document.getElementById("authShell");
@@ -97,6 +100,16 @@ async function iniciarSistema() {
     return;
   }
 
+  if (!configurarNuvem()) {
+    trocarAbaAuth("entrar");
+    definirMensagemAuth("mensagemEntrar", "O servidor do sistema ainda não foi configurado. Preencha o arquivo config.js com os dados do Firebase.");
+    travarFormulario(formEntrar, true);
+    travarFormulario(formCadastrar, true);
+    return;
+  }
+
+  document.addEventListener("visibilitychange", buscarAtualizacoes);
+  await nuvem.pronto.catch(() => {});
   await restaurarSessao();
   aplicarEstadoAutenticacao();
 }
@@ -216,11 +229,22 @@ async function derivarChave(senha, salt, iteracoes) {
   );
 }
 
-async function cifrar(chave, dados) {
+async function transformarBytes(bytes, transformacao) {
+  const fluxo = new Blob([bytes]).stream().pipeThrough(transformacao);
+  return new Uint8Array(await new Response(fluxo).arrayBuffer());
+}
+
+async function cifrar(chave, dados, compactar = false) {
   const iv = bytesAleatorios(12);
-  const conteudo = new TextEncoder().encode(JSON.stringify(dados));
+  let conteudo = new TextEncoder().encode(JSON.stringify(dados));
+  // Compacta antes de cifrar: o documento do servidor tem limite de 1 MB.
+  const gz = compactar && typeof CompressionStream === "function";
+  if (gz) conteudo = await transformarBytes(conteudo, new CompressionStream("gzip"));
+
   const cifrado = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, chave, conteudo);
-  return { iv: paraBase64(iv), dados: paraBase64(cifrado) };
+  const pacote = { iv: paraBase64(iv), dados: paraBase64(cifrado) };
+  if (gz) pacote.gz = true;
+  return pacote;
 }
 
 async function decifrar(chave, pacote) {
@@ -229,7 +253,8 @@ async function decifrar(chave, pacote) {
     chave,
     deBase64(pacote.dados)
   );
-  return JSON.parse(new TextDecoder().decode(aberto));
+  const bytes = pacote.gz ? await transformarBytes(aberto, new DecompressionStream("gzip")) : aberto;
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 /* ---------- Contas locais ---------- */
@@ -242,6 +267,7 @@ function lerJson(chave) {
   }
 }
 
+// Contas da versao antiga, que guardava tudo so no aparelho. Usadas apenas para migrar.
 function lerContas() {
   return lerJson(CONTAS_STORAGE_KEY);
 }
@@ -276,14 +302,155 @@ function limparFalhas(idConta) {
   localStorage.setItem(TENTATIVAS_STORAGE_KEY, JSON.stringify(tentativas));
 }
 
-async function iniciarSessao(idConta, email, chave) {
-  sessao = { idConta, email, chave };
+/* ---------- Servidor (Firebase) ---------- */
+
+function configurarNuvem() {
+  const config = window.CONTA_EM_DIA_FIREBASE || {};
+  if (!config.apiKey || !config.projectId || !window.firebase) return false;
+
+  const app = firebase.initializeApp(config);
+  nuvem = { auth: app.auth(), db: app.firestore() };
+  // O login do servidor tambem some quando a aba e fechada.
+  nuvem.pronto = nuvem.auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+  return true;
+}
+
+function refCofre(userId) {
+  return nuvem.db.collection("cofres").doc(userId);
+}
+
+async function senhaDoServidor(email, senha) {
+  // O servidor recebe uma senha derivada, nunca a digitada: assim ele nao consegue abrir o cofre.
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(senha), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: new TextEncoder().encode(`conta-em-dia:login:${email}`), iterations: 100000, hash: "SHA-256" },
+    material,
+    256
+  );
+  return paraBase64(bits);
+}
+
+function usuarioAtualDaNuvem() {
+  return new Promise((resolve) => {
+    const parar = nuvem.auth.onAuthStateChanged((usuario) => {
+      parar();
+      resolve(usuario);
+    });
+  });
+}
+
+async function lerCofreNuvem(userId) {
+  const documento = await refCofre(userId).get();
+  return documento.exists ? documento.data() : null;
+}
+
+async function criarCofreNuvem(userId, senha, dadosIniciais) {
+  const salt = bytesAleatorios(16);
+  const chave = await derivarChave(senha, salt, PBKDF2_ITERACOES);
+  const registro = {
+    salt: paraBase64(salt),
+    iteracoes: PBKDF2_ITERACOES,
+    cofre: await cifrar(chave, dadosIniciais, true),
+    versao: 1
+  };
+
+  await refCofre(userId).set(registro);
+  return { chave, registro };
+}
+
+async function gravarCofreNuvem(userId, versaoAtual, cofre) {
+  // Transacao: so grava se ninguem mudou os dados em outro aparelho desde a ultima leitura.
+  return nuvem.db.runTransaction(async (transacao) => {
+    const ref = refCofre(userId);
+    const documento = await transacao.get(ref);
+    if (!documento.exists || documento.data().versao !== versaoAtual) return false;
+
+    transacao.update(ref, { cofre, versao: versaoAtual + 1 });
+    return true;
+  });
+}
+
+async function lancamentosDoAparelho(email, senha) {
+  // Dados das versoes antigas, que ficavam so neste navegador, sobem para o servidor no primeiro login.
+  const contas = lerContas();
+  const idConta = await gerarIdConta(email);
+  const conta = contas[idConta];
+
+  if (conta) {
+    try {
+      const chave = await derivarChave(senha, deBase64(conta.salt), conta.iteracoes);
+      return { lista: atualizarNomesAntigos(await decifrar(chave, conta.cofre)), idConta };
+    } catch (erro) {
+      return { lista: [], idConta: null };
+    }
+  }
+
+  if (Object.keys(contas).length === 0) {
+    try {
+      const antigos = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
+      if (Array.isArray(antigos)) return { lista: atualizarNomesAntigos(antigos), idConta: null, legado: true };
+    } catch (erro) {
+      // Dado antigo corrompido: ignora.
+    }
+  }
+
+  return { lista: [], idConta: null };
+}
+
+function apagarDadosDoAparelho(migracao) {
+  if (migracao.idConta) {
+    const contas = lerContas();
+    delete contas[migracao.idConta];
+    gravarContas(contas);
+  }
+  if (migracao.legado) localStorage.removeItem(LEGACY_STORAGE_KEY);
+}
+
+async function abrirConta(usuario, email, senha) {
+  const migracao = await lancamentosDoAparelho(email, senha);
+  let registro = await lerCofreNuvem(usuario.uid);
+  let chave;
+  let precisaSalvar = false;
+
+  if (!registro) {
+    const criado = await criarCofreNuvem(usuario.uid, senha, migracao.lista);
+    registro = criado.registro;
+    chave = criado.chave;
+    lancamentos = migracao.lista;
+  } else {
+    chave = await derivarChave(senha, deBase64(registro.salt), registro.iteracoes);
+    lancamentos = atualizarNomesAntigos(await decifrar(chave, registro.cofre));
+
+    const idsExistentes = new Set(lancamentos.map((item) => item.id));
+    const novos = migracao.lista.filter((item) => !idsExistentes.has(item.id));
+    if (novos.length) {
+      lancamentos = lancamentos.concat(novos);
+      precisaSalvar = true;
+    }
+  }
+
+  await iniciarSessao({
+    userId: usuario.uid,
+    email,
+    chave,
+    salt: registro.salt,
+    iteracoes: registro.iteracoes,
+    versao: registro.versao
+  });
+
+  const salvou = precisaSalvar ? await salvarDados() : true;
+  if (salvou && migracao.lista.length) apagarDadosDoAparelho(migracao);
+}
+
+async function iniciarSessao(dados) {
+  sessao = dados;
   ultimaAtividade = Date.now();
-  const chaveBruta = await crypto.subtle.exportKey("raw", chave);
+  geracaoDados += 1;
+  const chaveBruta = await crypto.subtle.exportKey("raw", dados.chave);
   // sessionStorage some quando a aba e fechada: o login nao fica aberto no aparelho.
   sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-    idConta,
-    email,
+    userId: dados.userId,
+    email: dados.email,
     chave: paraBase64(chaveBruta)
   }));
 }
@@ -293,25 +460,54 @@ async function restaurarSessao() {
 
   try {
     const salvo = JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY));
-    if (!salvo) return;
+    if (!salvo || !salvo.userId) throw new Error("Sem sessao");
 
-    const conta = lerContas()[salvo.idConta];
-    if (!conta) throw new Error("Conta inexistente");
+    const usuario = await usuarioAtualDaNuvem();
+    if (!usuario || usuario.uid !== salvo.userId) throw new Error("Sessao expirada");
 
-    const chave = await crypto.subtle.importKey(
-      "raw",
-      deBase64(salvo.chave),
-      { name: "AES-GCM" },
-      true,
-      ["encrypt", "decrypt"]
-    );
+    const registro = await lerCofreNuvem(salvo.userId);
+    if (!registro) throw new Error("Cofre inexistente");
 
-    lancamentos = atualizarNomesAntigos(await decifrar(chave, conta.cofre));
-    sessao = { idConta: salvo.idConta, email: salvo.email, chave };
+    const chave = await crypto.subtle.importKey("raw", deBase64(salvo.chave), { name: "AES-GCM" }, true, ["encrypt", "decrypt"]);
+    lancamentos = atualizarNomesAntigos(await decifrar(chave, registro.cofre));
+    sessao = {
+      userId: salvo.userId,
+      email: salvo.email,
+      chave,
+      salt: registro.salt,
+      iteracoes: registro.iteracoes,
+      versao: registro.versao
+    };
   } catch (erro) {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
     sessao = null;
     lancamentos = [];
+    await nuvem.auth.signOut().catch(() => {});
+  }
+}
+
+async function recarregarDaNuvem(aviso) {
+  if (!sessao) return;
+  const sessaoAtual = sessao;
+  const registro = await lerCofreNuvem(sessaoAtual.userId);
+  if (!registro || sessao !== sessaoAtual) return;
+
+  lancamentos = atualizarNomesAntigos(await decifrar(sessaoAtual.chave, registro.cofre));
+  sessaoAtual.versao = registro.versao;
+  geracaoDados += 1;
+  renderizarTudo();
+  if (aviso) alert(aviso);
+}
+
+async function buscarAtualizacoes() {
+  // Ao voltar para a aba, traz o que foi lancado no outro aparelho.
+  if (!sessao || document.visibilityState !== "visible" || salvamentosPendentes > 0) return;
+
+  try {
+    const registro = await lerCofreNuvem(sessao.userId);
+    if (registro && registro.versao !== sessao.versao) await recarregarDaNuvem();
+  } catch (erro) {
+    // Sem internet agora: tenta de novo na proxima vez.
   }
 }
 
@@ -349,13 +545,7 @@ function aplicarEstadoAutenticacao() {
 
   authShell.classList.remove("auth-hidden");
   appShell.classList.add("app-hidden");
-
-  const existeConta = Object.keys(lerContas()).length > 0;
-  trocarAbaAuth(existeConta ? "entrar" : "cadastrar");
-
-  if (!existeConta) {
-    definirMensagemAuth("mensagemCadastro", "Primeiro acesso neste aparelho: crie seu e-mail e senha.", "info");
-  }
+  trocarAbaAuth("entrar");
 }
 
 function normalizarLogin(login) {
@@ -392,6 +582,26 @@ function travarFormulario(form, travado) {
   });
 }
 
+function mensagemDeErroDaNuvem(erro, padrao) {
+  const codigo = (erro && erro.code) || "";
+  if (codigo === "auth/network-request-failed" || codigo === "unavailable") {
+    return "Sem conexão com o servidor. Verifique sua internet e tente de novo.";
+  }
+  if (codigo === "auth/too-many-requests") return "Muitas tentativas. Aguarde alguns minutos e tente de novo.";
+  if (codigo === "auth/email-already-in-use") return "Este e-mail já tem cadastro. Use a aba Entrar.";
+  return padrao;
+}
+
+function ehErroDeSenha(erro) {
+  return ["auth/invalid-credential", "auth/invalid-login-credentials", "auth/wrong-password", "auth/user-not-found"]
+    .includes(erro && erro.code);
+}
+
+async function cadastrarNoServidor(email, senha) {
+  const credencial = await nuvem.auth.createUserWithEmailAndPassword(email, await senhaDoServidor(email, senha));
+  await abrirConta(credencial.user, email, senha);
+}
+
 async function criarAcesso(event) {
   event.preventDefault();
 
@@ -415,51 +625,17 @@ async function criarAcesso(event) {
     return;
   }
 
-  const idConta = await gerarIdConta(email);
-  const contas = lerContas();
-
-  if (contas[idConta]) {
-    definirMensagemAuth("mensagemCadastro", "Este e-mail já tem acesso neste aparelho. Use a aba Entrar.");
-    return;
-  }
-
   travarFormulario(formCadastrar, true);
   definirMensagemAuth("mensagemCadastro", "Protegendo seu acesso...", "info");
 
   try {
-    const salt = bytesAleatorios(16);
-    const chave = await derivarChave(senha, salt, PBKDF2_ITERACOES);
-    const dadosIniciais = importarDadosAntigos(contas);
-
-    contas[idConta] = {
-      salt: paraBase64(salt),
-      iteracoes: PBKDF2_ITERACOES,
-      criadoEm: new Date().toISOString(),
-      cofre: await cifrar(chave, dadosIniciais)
-    };
-    gravarContas(contas);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
-
-    lancamentos = dadosIniciais;
-    await iniciarSessao(idConta, email, chave);
+    await cadastrarNoServidor(email, senha);
     formCadastrar.reset();
     aplicarEstadoAutenticacao();
   } catch (erro) {
-    definirMensagemAuth("mensagemCadastro", "Não foi possível criar o acesso. Tente novamente.");
+    definirMensagemAuth("mensagemCadastro", mensagemDeErroDaNuvem(erro, "Não foi possível criar o acesso. Tente novamente."));
   } finally {
     travarFormulario(formCadastrar, false);
-  }
-}
-
-function importarDadosAntigos(contas) {
-  // Lancamentos da versao antiga (sem criptografia) vao para a primeira conta criada.
-  if (Object.keys(contas).length > 0) return [];
-
-  try {
-    const antigos = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
-    return Array.isArray(antigos) ? atualizarNomesAntigos(antigos) : [];
-  } catch (erro) {
-    return [];
   }
 }
 
@@ -486,19 +662,34 @@ async function entrarNoSistema(event) {
   definirMensagemAuth("mensagemEntrar", "Verificando...", "info");
 
   try {
-    const conta = lerContas()[idConta];
-    if (!conta) throw new Error("Conta inexistente");
+    let credencial;
 
-    const chave = await derivarChave(senha, deBase64(conta.salt), conta.iteracoes);
-    lancamentos = atualizarNomesAntigos(await decifrar(chave, conta.cofre));
+    try {
+      credencial = await nuvem.auth.signInWithEmailAndPassword(email, await senhaDoServidor(email, senha));
+    } catch (erro) {
+      if (!ehErroDeSenha(erro)) throw erro;
 
+      // Conta criada na versao antiga (so neste aparelho): cria o cadastro no servidor com a mesma senha.
+      const migracao = await lancamentosDoAparelho(email, senha);
+      if (!migracao.idConta) {
+        registrarFalha(idConta);
+        definirMensagemAuth("mensagemEntrar", "E-mail ou senha inválidos.");
+        return;
+      }
+
+      await cadastrarNoServidor(email, senha);
+      limparFalhas(idConta);
+      formEntrar.reset();
+      aplicarEstadoAutenticacao();
+      return;
+    }
+
+    await abrirConta(credencial.user, email, senha);
     limparFalhas(idConta);
-    await iniciarSessao(idConta, email, chave);
     formEntrar.reset();
     aplicarEstadoAutenticacao();
   } catch (erro) {
-    registrarFalha(idConta);
-    definirMensagemAuth("mensagemEntrar", "E-mail ou senha inválidos.");
+    definirMensagemAuth("mensagemEntrar", mensagemDeErroDaNuvem(erro, "Não foi possível entrar agora. Tente novamente."));
   } finally {
     travarFormulario(formEntrar, false);
   }
@@ -512,6 +703,8 @@ function sairDoSistema() {
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
   sessao = null;
   lancamentos = [];
+  geracaoDados += 1;
+  if (nuvem) nuvem.auth.signOut().catch(() => {});
   limparFormulario();
   // Redesenha tabelas, totais e resumos vazios para nao sobrar dado na tela.
   renderizarTudo();
@@ -546,23 +739,36 @@ function definirDataHoje() {
   document.getElementById("data").value = dataFormatada;
 }
 
-function salvarNoNavegador() {
-  if (!sessao) return Promise.resolve();
+function salvarDados() {
+  if (!sessao) return Promise.resolve(false);
 
-  const { idConta, chave } = sessao;
+  const sessaoAtual = sessao;
+  const geracao = geracaoDados;
   const copia = lancamentos.slice();
+  salvamentosPendentes += 1;
 
   // Fila garante que gravacoes seguidas terminem na ordem certa.
   filaSalvamento = filaSalvamento
     .then(async () => {
-      const cofre = await cifrar(chave, copia);
-      const contas = lerContas();
-      if (!contas[idConta]) return;
-      contas[idConta].cofre = cofre;
-      gravarContas(contas);
+      if (sessao !== sessaoAtual || geracao !== geracaoDados) return false;
+
+      const cofre = await cifrar(sessaoAtual.chave, copia, true);
+      const gravou = await gravarCofreNuvem(sessaoAtual.userId, sessaoAtual.versao, cofre);
+
+      if (!gravou) {
+        await recarregarDaNuvem("Seus dados foram alterados em outro aparelho. A tela foi atualizada com a versão mais recente. Confira e refaça a última alteração, se precisar.");
+        return false;
+      }
+
+      sessaoAtual.versao += 1;
+      return true;
     })
     .catch(() => {
-      alert("Não foi possível salvar os dados neste aparelho. Verifique o espaço do navegador.");
+      alert("Não foi possível salvar. Verifique sua internet e tente de novo.");
+      return false;
+    })
+    .finally(() => {
+      salvamentosPendentes -= 1;
     });
 
   return filaSalvamento;
@@ -764,7 +970,7 @@ function salvarLancamento(event) {
     lancamentos.push(novoLancamento);
   }
 
-  salvarNoNavegador();
+  salvarDados();
   limparFormulario();
   renderizarTudo();
 }
@@ -808,7 +1014,7 @@ function marcarComoPago(id) {
     ? { ...lancamento, situacao: "pago", realizado: lancamento.previsto, diferenca: 0 }
     : lancamento);
 
-  salvarNoNavegador();
+  salvarDados();
   renderizarTudo();
 }
 
@@ -817,7 +1023,7 @@ function excluirLancamento(id) {
   if (!confirmar) return;
 
   lancamentos = lancamentos.filter((item) => item.id !== id);
-  salvarNoNavegador();
+  salvarDados();
   renderizarTudo();
 }
 
@@ -1216,7 +1422,7 @@ function apagarTudo() {
   if (!confirmar) return;
 
   lancamentos = [];
-  salvarNoNavegador();
+  salvarDados();
   renderizarTudo();
 }
 
@@ -1282,15 +1488,12 @@ async function baixarBackup() {
     return;
   }
 
-  const conta = lerContas()[sessao.idConta];
-  if (!conta) return;
-
   // Cifrado com a chave da sessao: so abre com a senha desta conta.
   const conteudo = JSON.stringify({
     sistema: "conta-em-dia",
     versao: 2,
-    salt: conta.salt,
-    iteracoes: conta.iteracoes,
+    salt: sessao.salt,
+    iteracoes: sessao.iteracoes,
     cofre: await cifrar(sessao.chave, lancamentos)
   });
 
@@ -1497,7 +1700,7 @@ async function importarBackup(event) {
   if (!confirm(`Adicionar ${novos.length} lançamento(s) do backup?`)) return;
 
   lancamentos = lancamentos.concat(novos);
-  salvarNoNavegador();
+  salvarDados();
   renderizarTudo();
   alert(`${novos.length} lançamento(s) importado(s) e ${ignorados} ignorado(s).`);
 }

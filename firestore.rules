@@ -1,0 +1,29 @@
+rules_version = '2';
+
+// Cada pessoa só lê e grava o próprio cofre. O conteúdo já chega criptografado.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /cofres/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(["salt", "iteracoes", "cofre", "versao"])
+        && request.resource.data.versao == 1;
+
+      // Versão sobe de 1 em 1: impede que um aparelho apague o que o outro gravou.
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(["salt", "iteracoes", "cofre", "versao"])
+        && request.resource.data.salt == resource.data.salt
+        && request.resource.data.iteracoes == resource.data.iteracoes
+        && request.resource.data.versao == resource.data.versao + 1;
+
+      allow delete: if false;
+    }
+
+    match /{documento=**} {
+      allow read, write: if false;
+    }
+  }
+}
