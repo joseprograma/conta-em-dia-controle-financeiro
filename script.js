@@ -38,6 +38,7 @@ const gruposDespesa = [
   "Cartão de crédito",
   "Dívida",
   "Empréstimo",
+  "Consórcio",
   "Compra pessoal",
   "Educação",
   "Lazer",
@@ -118,6 +119,7 @@ function configurarBotoes() {
   });
 
   document.getElementById("tipo").addEventListener("change", controlarCamposPorTipo);
+  document.getElementById("situacao").addEventListener("change", atualizarCampoSituacao);
   arquivoBackup.addEventListener("change", importarBackup);
 
   // Um listener por tabela: os botoes gerados so carregam data-acao e data-id.
@@ -128,6 +130,7 @@ function configurarBotoes() {
 
       if (botao.dataset.acao === "editar") editarLancamento(botao.dataset.id);
       if (botao.dataset.acao === "excluir") excluirLancamento(botao.dataset.id);
+      if (botao.dataset.acao === "pagar") marcarComoPago(botao.dataset.id);
     });
   });
 }
@@ -614,6 +617,9 @@ function obterResumoFinanceiro(lista) {
   const receitaRealizada = somar(receitas, "realizado");
   const despesaPrevista = somar(despesas, "previsto");
   const despesaRealizada = somar(despesas, "realizado");
+  const faltaPagar = somarPendente(despesas);
+  const faltaReceber = somarPendente(receitas);
+  const saldoRealizado = receitaRealizada - despesaRealizada;
 
   return {
     receitas,
@@ -623,8 +629,22 @@ function obterResumoFinanceiro(lista) {
     despesaPrevista,
     despesaRealizada,
     saldoPrevisto: receitaPrevista - despesaPrevista,
-    saldoRealizado: receitaRealizada - despesaRealizada
+    saldoRealizado,
+    faltaPagar,
+    faltaReceber,
+    // Quanto sobra (ou falta) depois de receber e pagar tudo o que esta pendente.
+    saldoFinal: saldoRealizado + faltaReceber - faltaPagar
   };
+}
+
+function estaPendente(item) {
+  return item.situacao === "pendente";
+}
+
+function somarPendente(lista) {
+  return lista
+    .filter(estaPendente)
+    .reduce((total, item) => total + Math.max(0, Number(item.previsto || 0) - Number(item.realizado || 0)), 0);
 }
 
 function obterMaiorGrupo(lista, tipo) {
@@ -668,6 +688,12 @@ function controlarCamposPorTipo() {
     .map((item) => `<option value="${item}">${item}</option>`)
     .join("");
 
+  const opcoesSituacao = document.getElementById("situacao").options;
+  opcoesSituacao[0].textContent = tipo === "receita" ? "Recebido" : "Pago";
+  opcoesSituacao[1].textContent = tipo === "receita" ? "Falta receber" : "Falta pagar";
+  document.getElementById("rotuloRealizado").textContent = tipo === "receita" ? "Valor recebido" : "Valor pago";
+  atualizarCampoSituacao();
+
   if (tipo === "receita") {
     classificacao.value = "";
     classificacao.disabled = true;
@@ -676,6 +702,20 @@ function controlarCamposPorTipo() {
     if (!classificacao.value) {
       classificacao.value = "Fixa";
     }
+  }
+}
+
+function atualizarCampoSituacao() {
+  const pendente = document.getElementById("situacao").value === "pendente";
+  const realizado = document.getElementById("realizado");
+  const previsto = document.getElementById("previsto");
+
+  realizado.readOnly = pendente;
+
+  if (pendente) {
+    realizado.value = "0";
+  } else if (!Number(realizado.value) && previsto.value) {
+    realizado.value = previsto.value;
   }
 }
 
@@ -688,7 +728,8 @@ function salvarLancamento(event) {
   const descricao = document.getElementById("descricao").value.trim();
   const classificacao = document.getElementById("classificacao").value;
   const previsto = valorNumero("previsto");
-  const realizado = valorNumero("realizado");
+  const situacao = document.getElementById("situacao").value === "pendente" ? "pendente" : "pago";
+  const realizado = situacao === "pendente" ? 0 : valorNumero("realizado");
   const data = document.getElementById("data").value;
   const observacao = document.getElementById("observacao").value.trim();
 
@@ -710,6 +751,7 @@ function salvarLancamento(event) {
     previsto,
     realizado,
     diferenca: realizado - previsto,
+    situacao,
     data,
     mes,
     ano,
@@ -747,10 +789,27 @@ function editarLancamento(id) {
   document.getElementById("classificacao").value = item.classificacao || "";
   document.getElementById("previsto").value = item.previsto;
   document.getElementById("realizado").value = item.realizado;
+  document.getElementById("situacao").value = estaPendente(item) ? "pendente" : "pago";
+  document.getElementById("realizado").readOnly = estaPendente(item);
   document.getElementById("data").value = item.data;
   document.getElementById("observacao").value = item.observacao || "";
 
   window.location.href = "#lancamento";
+}
+
+function marcarComoPago(id) {
+  const item = lancamentos.find((lancamento) => lancamento.id === id);
+  if (!item) return;
+
+  const texto = item.tipo === "receita" ? "recebido" : "pago";
+  if (!confirm(`Marcar "${item.descricao}" como ${texto} (${formatarMoeda(item.previsto)})?`)) return;
+
+  lancamentos = lancamentos.map((lancamento) => lancamento.id === id
+    ? { ...lancamento, situacao: "pago", realizado: lancamento.previsto, diferenca: 0 }
+    : lancamento);
+
+  salvarNoNavegador();
+  renderizarTudo();
 }
 
 function excluirLancamento(id) {
@@ -804,10 +863,11 @@ function renderizarReceitas(receitas) {
             ${item.observacao ? `<br><small>${escaparHtml(item.observacao)}</small>` : ""}
           </td>
           <td>${formatarMoeda(item.previsto)}</td>
-          <td>${formatarMoeda(item.realizado)}</td>
-          <td class="${classe}">${formatarMoeda(diferenca)}</td>
+          <td>${formatarMoeda(item.realizado)}${seloSituacao(item)}</td>
+          ${celulaDiferenca(item, diferenca, classe)}
           <td>${formatarData(item.data)}</td>
           <td>
+            ${botaoPagar(item)}
             <button type="button" class="btn btn-secondary btn-small" data-acao="editar" data-id="${escaparHtml(item.id)}">Editar</button>
             <button type="button" class="btn btn-danger btn-small" data-acao="excluir" data-id="${escaparHtml(item.id)}">Excluir</button>
           </td>
@@ -845,10 +905,11 @@ function renderizarDespesas(despesas) {
           </td>
           <td><span class="badge ${badgeClasse}">${escaparHtml(item.classificacao)}</span></td>
           <td>${formatarMoeda(item.previsto)}</td>
-          <td>${formatarMoeda(item.realizado)}</td>
-          <td class="${classe}">${formatarMoeda(diferenca)}</td>
+          <td>${formatarMoeda(item.realizado)}${seloSituacao(item)}</td>
+          ${celulaDiferenca(item, diferenca, classe)}
           <td>${formatarData(item.data)}</td>
           <td>
+            ${botaoPagar(item)}
             <button type="button" class="btn btn-secondary btn-small" data-acao="editar" data-id="${escaparHtml(item.id)}">Editar</button>
             <button type="button" class="btn btn-danger btn-small" data-acao="excluir" data-id="${escaparHtml(item.id)}">Excluir</button>
           </td>
@@ -856,6 +917,22 @@ function renderizarDespesas(despesas) {
       `;
     })
     .join("");
+}
+
+function celulaDiferenca(item, diferenca, classe) {
+  if (estaPendente(item)) return `<td class="valor-pendente">-</td>`;
+  return `<td class="${classe}">${formatarMoeda(diferenca)}</td>`;
+}
+
+function seloSituacao(item) {
+  if (!estaPendente(item)) return "";
+  return `<br><span class="badge pendente">${item.tipo === "receita" ? "Falta receber" : "Falta pagar"}</span>`;
+}
+
+function botaoPagar(item) {
+  if (!estaPendente(item)) return "";
+  const texto = item.tipo === "receita" ? "Recebi" : "Paguei";
+  return `<button type="button" class="btn btn-success btn-small" data-acao="pagar" data-id="${escaparHtml(item.id)}">${texto}</button>`;
 }
 
 function somar(lista, campo) {
@@ -874,7 +951,7 @@ function renderizarTotais() {
     saldoRealizado
   } = resumo;
 
-  const diferencaGeral = saldoRealizado - saldoPrevisto;
+  const diferencaGeral = resumo.saldoFinal - saldoPrevisto;
 
   document.getElementById("totalReceitaPrevista").textContent = formatarMoeda(receitaPrevista);
   document.getElementById("totalReceitaRealizada").textContent = formatarMoeda(receitaRealizada);
@@ -883,12 +960,13 @@ function renderizarTotais() {
   document.getElementById("saldoPrevisto").textContent = formatarMoeda(saldoPrevisto);
   document.getElementById("saldoRealizado").textContent = formatarMoeda(saldoRealizado);
   document.getElementById("diferencaGeral").textContent = formatarMoeda(diferencaGeral);
+  document.getElementById("totalFaltaPagar").textContent = formatarMoeda(resumo.faltaPagar);
   document.getElementById("rodapeReceitaPrevista").textContent = formatarMoeda(receitaPrevista);
   document.getElementById("rodapeReceitaRealizada").textContent = formatarMoeda(receitaRealizada);
-  document.getElementById("rodapeReceitaDiferenca").textContent = formatarMoeda(receitaRealizada - receitaPrevista);
+  document.getElementById("rodapeReceitaDiferenca").textContent = formatarMoeda(receitaRealizada + resumo.faltaReceber - receitaPrevista);
   document.getElementById("rodapeDespesaPrevista").textContent = formatarMoeda(despesaPrevista);
   document.getElementById("rodapeDespesaRealizada").textContent = formatarMoeda(despesaRealizada);
-  document.getElementById("rodapeDespesaDiferenca").textContent = formatarMoeda(despesaPrevista - despesaRealizada);
+  document.getElementById("rodapeDespesaDiferenca").textContent = formatarMoeda(despesaPrevista - despesaRealizada - resumo.faltaPagar);
 
   aplicarCoresSaldo("saldoPrevisto", saldoPrevisto);
   aplicarCoresSaldo("saldoRealizado", saldoRealizado);
@@ -926,7 +1004,26 @@ function renderizarAnaliseFinanceira() {
   const maiorDespesa = obterMaiorGrupo(dadosPeriodo, "despesa");
   const sugestoes = gerarSugestoesPlanejamento(resumo, maiorReceita, maiorDespesa);
 
-  if (saldoRealizado > 0) {
+  if (resumo.faltaPagar > 0 || resumo.faltaReceber > 0) {
+    const saldoFinal = resumo.saldoFinal;
+    const aReceber = resumo.faltaReceber > 0 ? ` e ${formatarMoeda(resumo.faltaReceber)} para receber` : "";
+
+    mensagemResultado.textContent = `Hoje você tem ${formatarMoeda(saldoRealizado)} em caixa (ganhos recebidos menos contas pagas).`;
+
+    if (saldoFinal < 0) {
+      tituloResultado.textContent = `Vão faltar ${formatarMoeda(Math.abs(saldoFinal))} para pagar tudo`;
+      detalheResultado.textContent = `Ainda faltam ${formatarMoeda(resumo.faltaPagar)} em contas a pagar${aReceber}. Priorize as contas essenciais e renegocie o que não couber no orçamento.`;
+      statusResultado.classList.add("negativo");
+    } else if (saldoFinal > 0) {
+      tituloResultado.textContent = `Depois de pagar tudo, vão sobrar ${formatarMoeda(saldoFinal)}`;
+      detalheResultado.textContent = `Ainda faltam ${formatarMoeda(resumo.faltaPagar)} em contas a pagar${aReceber}. Não gaste essa sobra antes de quitar as contas pendentes.`;
+      statusResultado.classList.add("positivo");
+    } else {
+      tituloResultado.textContent = "Vai ficar empatado depois de pagar tudo";
+      detalheResultado.textContent = `Ainda faltam ${formatarMoeda(resumo.faltaPagar)} em contas a pagar${aReceber}. Não vai sobrar nada, então evite gastos extras.`;
+      statusResultado.classList.add("neutro");
+    }
+  } else if (saldoRealizado > 0) {
     mensagemResultado.textContent = "Os ganhos ficaram maiores que as despesas neste período.";
     tituloResultado.textContent = `Sobrou ${formatarMoeda(saldoRealizado)} no fim do mês`;
     detalheResultado.textContent = "Seu resultado foi positivo. Vale separar parte dessa sobra para reserva e contas futuras.";
@@ -959,6 +1056,13 @@ function gerarSugestoesPlanejamento(resumo, maiorReceita, maiorDespesa) {
   const despesasVariaveis = resumo.despesas.filter((item) => item.classificacao === "Variável" || item.classificacao === "Variavel");
   const totalVariavel = somar(despesasVariaveis, "realizado");
 
+  if (resumo.faltaPagar > 0) {
+    sugestoes.push({
+      titulo: "Separe o dinheiro das contas pendentes",
+      texto: `Ainda faltam ${formatarMoeda(resumo.faltaPagar)} em contas a pagar. Guarde esse valor assim que receber, antes de qualquer outro gasto, para não atrasar e pagar juros.`
+    });
+  }
+
   if (maiorDespesa) {
     sugestoes.push({
       titulo: `Olhe primeiro para ${maiorDespesa.grupo}`,
@@ -987,7 +1091,7 @@ function gerarSugestoesPlanejamento(resumo, maiorReceita, maiorDespesa) {
     });
   }
 
-  if (resumo.saldoRealizado <= 0) {
+  if (resumo.saldoFinal <= 0) {
     sugestoes.push({
       titulo: "Monte uma sobra obrigatória",
       texto: "Assim que receber, separe primeiro um valor pequeno para reserva e só depois distribua o restante nas despesas. Isso evita que todo o dinheiro suma antes do fim do mês."
@@ -995,7 +1099,7 @@ function gerarSugestoesPlanejamento(resumo, maiorReceita, maiorDespesa) {
   } else {
     sugestoes.push({
       titulo: "Transforme a sobra em segurança",
-      texto: `Como sobrou ${formatarMoeda(resumo.saldoRealizado)}, vale guardar uma parte para contas inesperadas e outra para despesas anuais, como material escolar, remédios ou manutenção.`
+      texto: `Como sobra ${formatarMoeda(resumo.saldoFinal)}, vale guardar uma parte para contas inesperadas e outra para despesas anuais, como material escolar, remédios ou manutenção.`
     });
   }
 
@@ -1090,6 +1194,7 @@ function exportarCSV() {
     "Previsto",
     "Realizado",
     "Diferença",
+    "Situação",
     "Data",
     "Observação"
   ];
@@ -1102,6 +1207,7 @@ function exportarCSV() {
     item.previsto,
     item.realizado,
     item.tipo === "despesa" ? item.previsto - item.realizado : item.realizado - item.previsto,
+    estaPendente(item) ? (item.tipo === "receita" ? "Falta receber" : "Falta pagar") : (item.tipo === "receita" ? "Recebido" : "Pago"),
     item.data,
     item.observacao || ""
   ]);
@@ -1185,7 +1291,8 @@ function lancamentoEhValido(item) {
     && textoEhValido(item.descricao, DESCRICAO_MAXIMA, true)
     && textoEhValido(item.observacao, OBSERVACAO_MAXIMA, false)
     && valorEhValido(item.previsto)
-    && valorEhValido(item.realizado);
+    && valorEhValido(item.realizado)
+    && (item.situacao === undefined || item.situacao === "pago" || item.situacao === "pendente");
 }
 
 function limparLancamentoImportado(item) {
@@ -1204,6 +1311,7 @@ function limparLancamentoImportado(item) {
     previsto: item.previsto,
     realizado: item.realizado,
     diferenca: item.realizado - item.previsto,
+    situacao: item.situacao === "pendente" ? "pendente" : "pago",
     data: item.data,
     mes,
     ano,
