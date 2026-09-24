@@ -14,33 +14,49 @@ const DESCRICAO_MAXIMA = 200;
 const OBSERVACAO_MAXIMA = 500;
 
 const gruposReceita = [
-  "Salario",
-  "Diaria",
+  "Salário",
+  "Diária",
   "Venda",
   "Pix recebido",
-  "Beneficio",
+  "Benefício",
   "Ajuda familiar",
-  "Servico prestado",
+  "Serviço prestado",
   "Outros ganhos"
 ];
 
 const gruposDespesa = [
   "Energia",
-  "Agua",
+  "Água",
   "Internet",
   "Telefone",
-  "Alimentacao",
+  "TV",
+  "Alimentação",
   "Mercado",
   "Transporte",
-  "Remedio",
+  "Remédio",
   "Aluguel",
-  "Cartao de credito",
-  "Divida",
+  "Cartão de crédito",
+  "Dívida",
+  "Empréstimo",
   "Compra pessoal",
-  "Educacao",
+  "Educação",
   "Lazer",
   "Outros gastos"
 ];
+
+// Nomes gravados pelas versoes anteriores, sem acento.
+const GRUPOS_ANTIGOS = {
+  Salario: "Salário",
+  Diaria: "Diária",
+  Beneficio: "Benefício",
+  "Servico prestado": "Serviço prestado",
+  Agua: "Água",
+  Alimentacao: "Alimentação",
+  Remedio: "Remédio",
+  "Cartao de credito": "Cartão de crédito",
+  Divida: "Dívida",
+  Educacao: "Educação"
+};
 
 let lancamentos = [];
 let mesAtual = new Date().getMonth() + 1;
@@ -76,7 +92,7 @@ async function iniciarSistema() {
 
   if (!criptografiaDisponivel()) {
     trocarAbaAuth("entrar");
-    definirMensagemAuth("mensagemEntrar", "Este navegador nao suporta a protecao do sistema. Abra pelo Chrome, Edge ou Firefox atualizado, em endereco https.");
+    definirMensagemAuth("mensagemEntrar", "Este navegador não suporta a proteção do sistema. Abra pelo Chrome, Edge ou Firefox atualizado, em endereço https.");
     return;
   }
 
@@ -127,12 +143,25 @@ function configurarSaidaPorInatividade() {
   const verificar = () => {
     if (sessao && Date.now() - ultimaAtividade >= INATIVIDADE_MS) {
       sairDoSistema();
-      definirMensagemAuth("mensagemEntrar", "Sessao encerrada apos 15 minutos sem uso.", "info");
+      definirMensagemAuth("mensagemEntrar", "Sessão encerrada após 15 minutos sem uso.", "info");
     }
   };
 
   setInterval(verificar, 30 * 1000);
   document.addEventListener("visibilitychange", verificar);
+}
+
+function atualizarNomesAntigos(lista) {
+  if (!Array.isArray(lista)) return lista;
+
+  return lista.map((item) => {
+    if (!item || typeof item !== "object") return item;
+
+    const atualizado = { ...item };
+    if (Object.hasOwn(GRUPOS_ANTIGOS, item.grupo)) atualizado.grupo = GRUPOS_ANTIGOS[item.grupo];
+    if (item.classificacao === "Variavel") atualizado.classificacao = "Variável";
+    return atualizado;
+  });
 }
 
 /* ---------- Criptografia ---------- */
@@ -274,7 +303,7 @@ async function restaurarSessao() {
       ["encrypt", "decrypt"]
     );
 
-    lancamentos = await decifrar(chave, conta.cofre);
+    lancamentos = atualizarNomesAntigos(await decifrar(chave, conta.cofre));
     sessao = { idConta: salvo.idConta, email: salvo.email, chave };
   } catch (erro) {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
@@ -336,8 +365,8 @@ function emailEhValido(email) {
 
 function problemaNaSenha(senha) {
   const texto = String(senha || "");
-  if (texto.length < SENHA_MINIMA) return `A senha precisa ter no minimo ${SENHA_MINIMA} caracteres.`;
-  if (!/[a-zA-Z]/.test(texto) || !/\d/.test(texto)) return "A senha precisa ter letras e numeros.";
+  if (texto.length < SENHA_MINIMA) return `A senha precisa ter no mínimo ${SENHA_MINIMA} caracteres.`;
+  if (!/[a-zA-Z]/.test(texto) || !/\d/.test(texto)) return "A senha precisa ter letras e números.";
   return "";
 }
 
@@ -368,7 +397,7 @@ async function criarAcesso(event) {
   const confirmacao = document.getElementById("senhaCadastroConfirmacao").value;
 
   if (!emailEhValido(email)) {
-    definirMensagemAuth("mensagemCadastro", "Digite um e-mail valido.");
+    definirMensagemAuth("mensagemCadastro", "Digite um e-mail válido.");
     return;
   }
 
@@ -379,7 +408,7 @@ async function criarAcesso(event) {
   }
 
   if (senha !== confirmacao) {
-    definirMensagemAuth("mensagemCadastro", "As senhas nao conferem.");
+    definirMensagemAuth("mensagemCadastro", "As senhas não conferem.");
     return;
   }
 
@@ -387,7 +416,7 @@ async function criarAcesso(event) {
   const contas = lerContas();
 
   if (contas[idConta]) {
-    definirMensagemAuth("mensagemCadastro", "Este e-mail ja tem acesso neste aparelho. Use a aba Entrar.");
+    definirMensagemAuth("mensagemCadastro", "Este e-mail já tem acesso neste aparelho. Use a aba Entrar.");
     return;
   }
 
@@ -413,7 +442,7 @@ async function criarAcesso(event) {
     formCadastrar.reset();
     aplicarEstadoAutenticacao();
   } catch (erro) {
-    definirMensagemAuth("mensagemCadastro", "Nao foi possivel criar o acesso. Tente novamente.");
+    definirMensagemAuth("mensagemCadastro", "Não foi possível criar o acesso. Tente novamente.");
   } finally {
     travarFormulario(formCadastrar, false);
   }
@@ -425,7 +454,7 @@ function importarDadosAntigos(contas) {
 
   try {
     const antigos = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
-    return Array.isArray(antigos) ? antigos : [];
+    return Array.isArray(antigos) ? atualizarNomesAntigos(antigos) : [];
   } catch (erro) {
     return [];
   }
@@ -458,7 +487,7 @@ async function entrarNoSistema(event) {
     if (!conta) throw new Error("Conta inexistente");
 
     const chave = await derivarChave(senha, deBase64(conta.salt), conta.iteracoes);
-    lancamentos = await decifrar(chave, conta.cofre);
+    lancamentos = atualizarNomesAntigos(await decifrar(chave, conta.cofre));
 
     limparFalhas(idConta);
     await iniciarSessao(idConta, email, chave);
@@ -466,7 +495,7 @@ async function entrarNoSistema(event) {
     aplicarEstadoAutenticacao();
   } catch (erro) {
     registrarFalha(idConta);
-    definirMensagemAuth("mensagemEntrar", "E-mail ou senha invalidos.");
+    definirMensagemAuth("mensagemEntrar", "E-mail ou senha inválidos.");
   } finally {
     travarFormulario(formEntrar, false);
   }
@@ -489,7 +518,7 @@ function sairDoSistema() {
 
 function preencherMeses() {
   const meses = [
-    "Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
   ];
 
@@ -530,7 +559,7 @@ function salvarNoNavegador() {
       gravarContas(contas);
     })
     .catch(() => {
-      alert("Nao foi possivel salvar os dados neste aparelho. Verifique o espaco do navegador.");
+      alert("Não foi possível salvar os dados neste aparelho. Verifique o espaço do navegador.");
     });
 
   return filaSalvamento;
@@ -622,7 +651,7 @@ function obterMesAnoAnterior(referencia) {
 
 function nomeMes(mes) {
   const meses = [
-    "janeiro", "fevereiro", "marco", "abril", "maio", "junho",
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
     "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
   ];
 
@@ -664,7 +693,7 @@ function salvarLancamento(event) {
   const observacao = document.getElementById("observacao").value.trim();
 
   if (!grupo || !descricao || !data) {
-    alert("Preencha grupo, descricao e data.");
+    alert("Preencha grupo, descrição e data.");
     return;
   }
 
@@ -725,7 +754,7 @@ function editarLancamento(id) {
 }
 
 function excluirLancamento(id) {
-  const confirmar = confirm("Deseja realmente excluir este lancamento?");
+  const confirmar = confirm("Deseja realmente excluir este lançamento?");
   if (!confirmar) return;
 
   lancamentos = lancamentos.filter((item) => item.id !== id);
@@ -755,7 +784,7 @@ function renderizarReceitas(receitas) {
   if (receitas.length === 0) {
     tabela.innerHTML = `
       <tr>
-        <td colspan="7" class="empty">Nenhum ganho cadastrado neste mes.</td>
+        <td colspan="7" class="empty">Nenhum ganho cadastrado neste mês.</td>
       </tr>
     `;
     return;
@@ -794,7 +823,7 @@ function renderizarDespesas(despesas) {
   if (despesas.length === 0) {
     tabela.innerHTML = `
       <tr>
-        <td colspan="8" class="empty">Nenhum gasto cadastrado neste mes.</td>
+        <td colspan="8" class="empty">Nenhum gasto cadastrado neste mês.</td>
       </tr>
     `;
     return;
@@ -878,14 +907,14 @@ function renderizarAnaliseFinanceira() {
   statusResultado.classList.remove("positivo", "negativo", "neutro");
 
   if (dadosPeriodo.length === 0) {
-    mensagemResultado.textContent = "Cadastre os lancamentos do mes para comparar ganhos e despesas automaticamente.";
-    tituloResultado.textContent = "Aguardando lancamentos";
-    detalheResultado.textContent = "Assim que houver dados, o sistema vai dizer se sobrou ou faltou dinheiro no mes.";
+    mensagemResultado.textContent = "Cadastre os lançamentos do mês para comparar ganhos e despesas automaticamente.";
+    tituloResultado.textContent = "Aguardando lançamentos";
+    detalheResultado.textContent = "Assim que houver dados, o sistema vai dizer se sobrou ou faltou dinheiro no mês.";
     statusResultado.classList.add("neutro");
     listaSugestoes.innerHTML = `
       <div class="suggestion-item">
-        <strong>Comece pelo basico</strong>
-        <p>Cadastre primeiro seus ganhos fixos e depois as despesas essenciais para montar um plano real do mes.</p>
+        <strong>Comece pelo básico</strong>
+        <p>Cadastre primeiro seus ganhos fixos e depois as despesas essenciais para montar um plano real do mês.</p>
       </div>
     `;
     return;
@@ -898,19 +927,19 @@ function renderizarAnaliseFinanceira() {
   const sugestoes = gerarSugestoesPlanejamento(resumo, maiorReceita, maiorDespesa);
 
   if (saldoRealizado > 0) {
-    mensagemResultado.textContent = "Os ganhos ficaram maiores que as despesas neste periodo.";
-    tituloResultado.textContent = `Sobrou ${formatarMoeda(saldoRealizado)} no fim do mes`;
+    mensagemResultado.textContent = "Os ganhos ficaram maiores que as despesas neste período.";
+    tituloResultado.textContent = `Sobrou ${formatarMoeda(saldoRealizado)} no fim do mês`;
     detalheResultado.textContent = "Seu resultado foi positivo. Vale separar parte dessa sobra para reserva e contas futuras.";
     statusResultado.classList.add("positivo");
   } else if (saldoRealizado < 0) {
-    mensagemResultado.textContent = "As despesas ficaram maiores que os ganhos neste periodo.";
-    tituloResultado.textContent = `Faltaram ${formatarMoeda(diferenca)} para fechar o mes`;
-    detalheResultado.textContent = "Voce fechou no vermelho. O ideal e cortar ou renegociar os maiores gastos e priorizar despesas essenciais.";
+    mensagemResultado.textContent = "As despesas ficaram maiores que os ganhos neste período.";
+    tituloResultado.textContent = `Faltaram ${formatarMoeda(diferenca)} para fechar o mês`;
+    detalheResultado.textContent = "Você fechou no vermelho. O ideal é cortar ou renegociar os maiores gastos e priorizar despesas essenciais.";
     statusResultado.classList.add("negativo");
   } else {
-    mensagemResultado.textContent = "Os ganhos ficaram iguais as despesas neste periodo.";
-    tituloResultado.textContent = "Mes empatado";
-    detalheResultado.textContent = "Nao faltou dinheiro, mas tambem nao sobrou. Um pequeno corte em gastos variaveis ja cria folga.";
+    mensagemResultado.textContent = "Os ganhos ficaram iguais às despesas neste período.";
+    tituloResultado.textContent = "Mês empatado";
+    detalheResultado.textContent = "Não faltou dinheiro, mas também não sobrou. Um pequeno corte em gastos variáveis já cria folga.";
     statusResultado.classList.add("neutro");
   }
 
@@ -933,40 +962,40 @@ function gerarSugestoesPlanejamento(resumo, maiorReceita, maiorDespesa) {
   if (maiorDespesa) {
     sugestoes.push({
       titulo: `Olhe primeiro para ${maiorDespesa.grupo}`,
-      texto: `${maiorDespesa.grupo} foi seu maior gasto realizado, somando ${formatarMoeda(maiorDespesa.valor)}. Veja se da para reduzir, parcelar melhor ou trocar por uma opcao mais barata.`
+      texto: `${maiorDespesa.grupo} foi seu maior gasto realizado, somando ${formatarMoeda(maiorDespesa.valor)}. Veja se dá para reduzir, parcelar melhor ou trocar por uma opção mais barata.`
     });
   }
 
   if (diferencaPrevistoRealizado > 0) {
     sugestoes.push({
       titulo: "Seus gastos passaram do planejado",
-      texto: `Voce gastou ${formatarMoeda(diferencaPrevistoRealizado)} acima do previsto. No proximo mes, aumente a previsao das contas que sempre passam do valor ou corte excessos antes da ultima semana.`
+      texto: `Você gastou ${formatarMoeda(diferencaPrevistoRealizado)} acima do previsto. No próximo mês, aumente a previsão das contas que sempre passam do valor ou corte excessos antes da última semana.`
     });
   }
 
   if (totalVariavel > 0) {
     sugestoes.push({
-      titulo: "Controle mais os gastos variaveis",
-      texto: `As despesas variaveis somaram ${formatarMoeda(totalVariavel)}. Definir um limite semanal para mercado, lazer e compras pessoais ajuda a nao terminar no vermelho.`
+      titulo: "Controle mais os gastos variáveis",
+      texto: `As despesas variáveis somaram ${formatarMoeda(totalVariavel)}. Definir um limite semanal para mercado, lazer e compras pessoais ajuda a não terminar no vermelho.`
     });
   }
 
   if (maiorReceita) {
     sugestoes.push({
       titulo: `Proteja sua principal entrada: ${maiorReceita.grupo}`,
-      texto: `${maiorReceita.grupo} foi a maior fonte de ganho, com ${formatarMoeda(maiorReceita.valor)}. Planeje as contas fixas usando essa base e trate ganhos extras como reforco, nao como obrigacao.`
+      texto: `${maiorReceita.grupo} foi a maior fonte de ganho, com ${formatarMoeda(maiorReceita.valor)}. Planeje as contas fixas usando essa base e trate ganhos extras como reforço, não como obrigação.`
     });
   }
 
   if (resumo.saldoRealizado <= 0) {
     sugestoes.push({
-      titulo: "Monte uma sobra obrigatoria",
-      texto: "Assim que receber, separe primeiro um valor pequeno para reserva e so depois distribua o restante nas despesas. Isso evita que todo o dinheiro suma antes do fim do mes."
+      titulo: "Monte uma sobra obrigatória",
+      texto: "Assim que receber, separe primeiro um valor pequeno para reserva e só depois distribua o restante nas despesas. Isso evita que todo o dinheiro suma antes do fim do mês."
     });
   } else {
     sugestoes.push({
-      titulo: "Transforme a sobra em seguranca",
-      texto: `Como sobrou ${formatarMoeda(resumo.saldoRealizado)}, vale guardar uma parte para contas inesperadas e outra para despesas anuais, como material escolar, remedios ou manutencao.`
+      titulo: "Transforme a sobra em segurança",
+      texto: `Como sobrou ${formatarMoeda(resumo.saldoRealizado)}, vale guardar uma parte para contas inesperadas e outra para despesas anuais, como material escolar, remédios ou manutenção.`
     });
   }
 
@@ -980,8 +1009,8 @@ function renderizarFechamentoMensal() {
   if (hoje.getDate() !== 1) {
     resumoMensal.innerHTML = `
       <div class="summary-item">
-        <strong>Fechamento disponivel no dia 1</strong>
-        <p>Abra o sistema no primeiro dia do mes para ver automaticamente o resumo do mes anterior, com a maior fonte de ganho e o maior foco de gastos.</p>
+        <strong>Fechamento disponível no dia 1</strong>
+        <p>Abra o sistema no primeiro dia do mês para ver automaticamente o resumo do mês anterior, com a maior fonte de ganho e o maior foco de gastos.</p>
       </div>
     `;
     return;
@@ -993,8 +1022,8 @@ function renderizarFechamentoMensal() {
   if (dadosPeriodoAnterior.length === 0) {
     resumoMensal.innerHTML = `
       <div class="summary-item">
-        <strong>Sem dados do mes anterior</strong>
-        <p>Nao ha lancamentos em ${nomeMes(periodoAnterior.mes)} de ${periodoAnterior.ano} para gerar o fechamento automatico.</p>
+        <strong>Sem dados do mês anterior</strong>
+        <p>Não há lançamentos em ${nomeMes(periodoAnterior.mes)} de ${periodoAnterior.ano} para gerar o fechamento automático.</p>
       </div>
     `;
     return;
@@ -1014,11 +1043,11 @@ function renderizarFechamentoMensal() {
     </div>
     <div class="summary-item">
       <strong>Onde ganhou mais</strong>
-      <p>${maiorReceita ? `${escaparHtml(maiorReceita.grupo)} trouxe ${formatarMoeda(maiorReceita.valor)}.` : "Nao houve ganhos cadastrados no mes anterior."}</p>
+      <p>${maiorReceita ? `${escaparHtml(maiorReceita.grupo)} trouxe ${formatarMoeda(maiorReceita.valor)}.` : "Não houve ganhos cadastrados no mês anterior."}</p>
     </div>
     <div class="summary-item">
       <strong>Onde gastou mais</strong>
-      <p>${maiorDespesa ? `${escaparHtml(maiorDespesa.grupo)} consumiu ${formatarMoeda(maiorDespesa.valor)}.` : "Nao houve gastos cadastrados no mes anterior."}</p>
+      <p>${maiorDespesa ? `${escaparHtml(maiorDespesa.grupo)} consumiu ${formatarMoeda(maiorDespesa.valor)}.` : "Não houve gastos cadastrados no mês anterior."}</p>
     </div>
   `;
 }
@@ -1035,7 +1064,7 @@ function aplicarCoresSaldo(id, valor) {
 }
 
 function apagarTudo() {
-  const confirmar = confirm("Tem certeza que deseja apagar todos os lancamentos?");
+  const confirmar = confirm("Tem certeza que deseja apagar todos os lançamentos?");
   if (!confirmar) return;
 
   lancamentos = [];
@@ -1047,7 +1076,7 @@ function exportarCSV() {
   const dadosPeriodo = obterLancamentosDoPeriodo();
 
   if (dadosPeriodo.length === 0) {
-    alert("Nao ha dados para exportar neste mes.");
+    alert("Não há dados para exportar neste mês.");
     return;
   }
 
@@ -1056,17 +1085,17 @@ function exportarCSV() {
   const cabecalho = [
     "Tipo",
     "Grupo",
-    "Descricao",
-    "Classificacao",
+    "Descrição",
+    "Classificação",
     "Previsto",
     "Realizado",
-    "Diferenca",
+    "Diferença",
     "Data",
-    "Observacao"
+    "Observação"
   ];
 
   const linhas = dadosPeriodo.map((item) => [
-    item.tipo,
+    item.tipo === "receita" ? "Receita" : "Despesa",
     item.grupo,
     item.descricao,
     item.classificacao,
@@ -1081,7 +1110,8 @@ function exportarCSV() {
     .map((linha) => linha.map((campo) => `"${String(campo).replace(/"/g, '""')}"`).join(";"))
     .join("\n");
 
-  const blob = new Blob([conteudo], { type: "text/csv;charset=utf-8;" });
+  // BOM para o Excel reconhecer os acentos em UTF-8.
+  const blob = new Blob(["﻿" + conteudo], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
 
@@ -1098,7 +1128,7 @@ async function baixarBackup() {
   if (!sessao) return;
 
   if (lancamentos.length === 0) {
-    alert("Nao ha lancamentos para salvar no backup.");
+    alert("Não há lançamentos para salvar no backup.");
     return;
   }
 
@@ -1261,7 +1291,7 @@ async function importarBackup(event) {
   if (!arquivo || !sessao) return;
 
   if (arquivo.size > BACKUP_TAMANHO_MAXIMO) {
-    alert("Arquivo muito grande. O limite do backup e 5 MB.");
+    alert("Arquivo muito grande. O limite do backup é 5 MB.");
     return;
   }
 
@@ -1283,14 +1313,16 @@ async function importarBackup(event) {
     if (!Array.isArray(recebidos)) throw new Error("Formato invalido");
   } catch (erro) {
     if (!sessao) return;
-    alert("Arquivo de backup invalido.");
+    alert("Arquivo de backup inválido.");
     return;
   }
 
   if (!sessao) return;
 
+  recebidos = atualizarNomesAntigos(recebidos);
+
   if (recebidos.length > BACKUP_MAXIMO_LANCAMENTOS) {
-    alert(`O backup tem ${recebidos.length} lancamentos. O limite por arquivo e ${BACKUP_MAXIMO_LANCAMENTOS}.`);
+    alert(`O backup tem ${recebidos.length} lançamentos. O limite por arquivo é ${BACKUP_MAXIMO_LANCAMENTOS}.`);
     return;
   }
 
@@ -1306,16 +1338,16 @@ async function importarBackup(event) {
   const ignorados = recebidos.length - novos.length;
 
   if (novos.length === 0) {
-    alert(`Nenhum lancamento importado. ${ignorados} ignorado(s) por serem invalidos ou repetidos.`);
+    alert(`Nenhum lançamento importado. ${ignorados} ignorado(s) por serem inválidos ou repetidos.`);
     return;
   }
 
-  if (!confirm(`Adicionar ${novos.length} lancamento(s) do backup?`)) return;
+  if (!confirm(`Adicionar ${novos.length} lançamento(s) do backup?`)) return;
 
   lancamentos = lancamentos.concat(novos);
   salvarNoNavegador();
   renderizarTudo();
-  alert(`${novos.length} lancamento(s) importado(s) e ${ignorados} ignorado(s).`);
+  alert(`${novos.length} lançamento(s) importado(s) e ${ignorados} ignorado(s).`);
 }
 
 document.addEventListener("DOMContentLoaded", iniciarSistema);
