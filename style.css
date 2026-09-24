@@ -872,4 +872,138 @@ input[readonly] {
   table {
     min-width: 760px;
   }
+
+  /* Menu compacto: nao ocupa a primeira tela inteira. */
+  .brand {
+    margin-bottom: 14px;
+  }
+
+  .menu {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .menu a {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    white-space: nowrap;
+  }
+
+  .sidebar-card {
+    display: none;
+  }
+
+  .sidebar-bottom {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .btn-logout {
+    width: auto;
+  }
+
+  /* Tabelas viram cartoes: cada lancamento mostra todos os campos sem rolar para o lado. */
+  .table-wrapper {
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+  }
+
+  table {
+    min-width: 0;
+    background: transparent;
+  }
+
+  thead {
+    display: none;
+  }
+
+  table,
+  tbody,
+  tfoot,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+  }
+
+  tbody tr,
+  tfoot tr {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 6px 14px;
+    margin-bottom: 12px;
+  }
+
+  tfoot tr {
+    background: #f1f5f9;
+    margin-bottom: 0;
+  }
+
+  td,
+  tfoot td {
+    position: relative;
+    padding: 9px 0 9px 104px;
+    border-bottom: 1px dashed var(--line);
+    background: transparent;
+    overflow-wrap: anywhere;
+  }
+
+  td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 9px;
+    width: 96px;
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 0.8rem;
+  }
+
+  tr td:last-child {
+    border-bottom: none;
+  }
+
+  td.empty,
+  td.celula-acoes,
+  td.rodape-titulo {
+    padding-left: 0;
+  }
+
+  td.empty::before,
+  td.celula-acoes::before,
+  td.rodape-titulo::before {
+    content: none;
+  }
+
+  td.rodape-titulo {
+    font-size: 1rem;
+  }
+
+  tfoot td:empty {
+    display: none;
+  }
+
+  td.celula-acoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 12px;
+  }
+
+  td.celula-acoes .btn {
+    width: auto;
+    flex: 1 1 auto;
+    padding: 10px 12px;
+  }
+
+  td .badge.pendente {
+    margin-left: 6px;
+  }
 }

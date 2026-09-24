@@ -857,16 +857,16 @@ function renderizarReceitas(receitas) {
 
       return `
         <tr>
-          <td>${escaparHtml(item.grupo)}</td>
-          <td>
+          <td data-label="Grupo">${escaparHtml(item.grupo)}</td>
+          <td data-label="Descrição">
             <strong>${escaparHtml(item.descricao)}</strong>
             ${item.observacao ? `<br><small>${escaparHtml(item.observacao)}</small>` : ""}
           </td>
-          <td>${formatarMoeda(item.previsto)}</td>
-          <td>${formatarMoeda(item.realizado)}${seloSituacao(item)}</td>
+          <td data-label="Previsto">${formatarMoeda(item.previsto)}</td>
+          <td data-label="${item.tipo === "receita" ? "Recebido" : "Pago"}">${formatarMoeda(item.realizado)}${seloSituacao(item)}</td>
           ${celulaDiferenca(item, diferenca, classe)}
-          <td>${formatarData(item.data)}</td>
-          <td>
+          <td data-label="Data">${formatarData(item.data)}</td>
+          <td class="celula-acoes">
             ${botaoPagar(item)}
             <button type="button" class="btn btn-secondary btn-small" data-acao="editar" data-id="${escaparHtml(item.id)}">Editar</button>
             <button type="button" class="btn btn-danger btn-small" data-acao="excluir" data-id="${escaparHtml(item.id)}">Excluir</button>
@@ -898,17 +898,17 @@ function renderizarDespesas(despesas) {
 
       return `
         <tr>
-          <td>${escaparHtml(item.grupo)}</td>
-          <td>
+          <td data-label="Grupo">${escaparHtml(item.grupo)}</td>
+          <td data-label="Descrição">
             <strong>${escaparHtml(item.descricao)}</strong>
             ${item.observacao ? `<br><small>${escaparHtml(item.observacao)}</small>` : ""}
           </td>
-          <td><span class="badge ${badgeClasse}">${escaparHtml(item.classificacao)}</span></td>
-          <td>${formatarMoeda(item.previsto)}</td>
-          <td>${formatarMoeda(item.realizado)}${seloSituacao(item)}</td>
+          <td data-label="Tipo"><span class="badge ${badgeClasse}">${escaparHtml(item.classificacao)}</span></td>
+          <td data-label="Previsto">${formatarMoeda(item.previsto)}</td>
+          <td data-label="${item.tipo === "receita" ? "Recebido" : "Pago"}">${formatarMoeda(item.realizado)}${seloSituacao(item)}</td>
           ${celulaDiferenca(item, diferenca, classe)}
-          <td>${formatarData(item.data)}</td>
-          <td>
+          <td data-label="Data">${formatarData(item.data)}</td>
+          <td class="celula-acoes">
             ${botaoPagar(item)}
             <button type="button" class="btn btn-secondary btn-small" data-acao="editar" data-id="${escaparHtml(item.id)}">Editar</button>
             <button type="button" class="btn btn-danger btn-small" data-acao="excluir" data-id="${escaparHtml(item.id)}">Excluir</button>
@@ -920,8 +920,8 @@ function renderizarDespesas(despesas) {
 }
 
 function celulaDiferenca(item, diferenca, classe) {
-  if (estaPendente(item)) return `<td class="valor-pendente">-</td>`;
-  return `<td class="${classe}">${formatarMoeda(diferenca)}</td>`;
+  if (estaPendente(item)) return `<td data-label="Diferença" class="valor-pendente">-</td>`;
+  return `<td data-label="Diferença" class="${classe}">${formatarMoeda(diferenca)}</td>`;
 }
 
 function seloSituacao(item) {
