@@ -7,6 +7,11 @@ const PBKDF2_ITERACOES = 310000;
 const SENHA_MINIMA = 8;
 const MAX_TENTATIVAS = 5;
 const BLOQUEIO_MS = 60 * 1000;
+const INATIVIDADE_MS = 15 * 60 * 1000;
+const BACKUP_TAMANHO_MAXIMO = 5 * 1024 * 1024;
+const BACKUP_MAXIMO_LANCAMENTOS = 5000;
+const DESCRICAO_MAXIMA = 200;
+const OBSERVACAO_MAXIMA = 500;
 
 const gruposReceita = [
   "Salario",
@@ -42,6 +47,7 @@ let mesAtual = new Date().getMonth() + 1;
 let anoAtual = new Date().getFullYear();
 let sessao = null;
 let filaSalvamento = Promise.resolve();
+let ultimaAtividade = Date.now();
 
 const authShell = document.getElementById("authShell");
 const appShell = document.getElementById("appShell");
@@ -65,9 +71,8 @@ async function iniciarSistema() {
     formLancamento.addEventListener("submit", salvarLancamento);
   }
 
-  if (arquivoBackup) {
-    arquivoBackup.addEventListener("change", importarBackup);
-  }
+  configurarBotoes();
+  configurarSaidaPorInatividade();
 
   if (!criptografiaDisponivel()) {
     trocarAbaAuth("entrar");
@@ -77,6 +82,57 @@ async function iniciarSistema() {
 
   await restaurarSessao();
   aplicarEstadoAutenticacao();
+}
+
+function configurarBotoes() {
+  const acoes = {
+    tabEntrar: () => trocarAbaAuth("entrar"),
+    tabCadastrar: () => trocarAbaAuth("cadastrar"),
+    btnSair: sairDoSistema,
+    btnAtualizar: atualizarPeriodo,
+    btnLimpar: limparFormulario,
+    btnExportarCsv: exportarCSV,
+    btnBaixarBackup: baixarBackup,
+    btnRestaurarBackup: () => arquivoBackup.click(),
+    btnApagarTudo: apagarTudo
+  };
+
+  Object.entries(acoes).forEach(([id, acao]) => {
+    document.getElementById(id).addEventListener("click", acao);
+  });
+
+  document.getElementById("tipo").addEventListener("change", controlarCamposPorTipo);
+  arquivoBackup.addEventListener("change", importarBackup);
+
+  // Um listener por tabela: os botoes gerados so carregam data-acao e data-id.
+  ["tabelaReceitas", "tabelaDespesas"].forEach((id) => {
+    document.getElementById(id).addEventListener("click", (event) => {
+      const botao = event.target.closest("button[data-acao]");
+      if (!botao) return;
+
+      if (botao.dataset.acao === "editar") editarLancamento(botao.dataset.id);
+      if (botao.dataset.acao === "excluir") excluirLancamento(botao.dataset.id);
+    });
+  });
+}
+
+function configurarSaidaPorInatividade() {
+  const registrarAtividade = () => { ultimaAtividade = Date.now(); };
+
+  ["mousemove", "mousedown", "keydown", "wheel", "scroll", "touchstart"].forEach((evento) => {
+    document.addEventListener(evento, registrarAtividade, { passive: true });
+  });
+
+  // Checagem por horario (e nao um setTimeout unico) funciona mesmo apos o aparelho dormir.
+  const verificar = () => {
+    if (sessao && Date.now() - ultimaAtividade >= INATIVIDADE_MS) {
+      sairDoSistema();
+      definirMensagemAuth("mensagemEntrar", "Sessao encerrada apos 15 minutos sem uso.", "info");
+    }
+  };
+
+  setInterval(verificar, 30 * 1000);
+  document.addEventListener("visibilitychange", verificar);
 }
 
 /* ---------- Criptografia ---------- */
@@ -190,6 +246,7 @@ function limparFalhas(idConta) {
 
 async function iniciarSessao(idConta, email, chave) {
   sessao = { idConta, email, chave };
+  ultimaAtividade = Date.now();
   const chaveBruta = await crypto.subtle.exportKey("raw", chave);
   // sessionStorage some quando a aba e fechada: o login nao fica aberto no aparelho.
   sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
@@ -416,10 +473,17 @@ async function entrarNoSistema(event) {
 }
 
 function sairDoSistema() {
+  if (document.getElementById("dialogSenhaBackup").open) {
+    document.getElementById("btnCancelarBackup").click();
+  }
+
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
   sessao = null;
   lancamentos = [];
   limparFormulario();
+  // Redesenha tabelas, totais e resumos vazios para nao sobrar dado na tela.
+  renderizarTudo();
+  document.getElementById("usuarioLogado").textContent = "";
   aplicarEstadoAutenticacao();
 }
 
@@ -482,7 +546,7 @@ function escaparHtml(valor) {
 }
 
 function gerarId() {
-  return Date.now().toString() + Math.random().toString(36).substring(2, 8);
+  return crypto.randomUUID().replace(/-/g, "");
 }
 
 function formatarMoeda(valor) {
@@ -715,8 +779,8 @@ function renderizarReceitas(receitas) {
           <td class="${classe}">${formatarMoeda(diferenca)}</td>
           <td>${formatarData(item.data)}</td>
           <td>
-            <button class="btn btn-secondary btn-small" onclick="editarLancamento('${escaparHtml(item.id)}')">Editar</button>
-            <button class="btn btn-danger btn-small" onclick="excluirLancamento('${escaparHtml(item.id)}')">Excluir</button>
+            <button type="button" class="btn btn-secondary btn-small" data-acao="editar" data-id="${escaparHtml(item.id)}">Editar</button>
+            <button type="button" class="btn btn-danger btn-small" data-acao="excluir" data-id="${escaparHtml(item.id)}">Excluir</button>
           </td>
         </tr>
       `;
@@ -756,8 +820,8 @@ function renderizarDespesas(despesas) {
           <td class="${classe}">${formatarMoeda(diferenca)}</td>
           <td>${formatarData(item.data)}</td>
           <td>
-            <button class="btn btn-secondary btn-small" onclick="editarLancamento('${escaparHtml(item.id)}')">Editar</button>
-            <button class="btn btn-danger btn-small" onclick="excluirLancamento('${escaparHtml(item.id)}')">Excluir</button>
+            <button type="button" class="btn btn-secondary btn-small" data-acao="editar" data-id="${escaparHtml(item.id)}">Editar</button>
+            <button type="button" class="btn btn-danger btn-small" data-acao="excluir" data-id="${escaparHtml(item.id)}">Excluir</button>
           </td>
         </tr>
       `;
@@ -987,6 +1051,8 @@ function exportarCSV() {
     return;
   }
 
+  if (!confirm("O arquivo CSV não é protegido por senha. Guarde em local seguro. Deseja continuar?")) return;
+
   const cabecalho = [
     "Tipo",
     "Grupo",
@@ -1026,18 +1092,27 @@ function exportarCSV() {
   URL.revokeObjectURL(url);
 }
 
-function baixarBackup() {
+/* ---------- Backup ---------- */
+
+async function baixarBackup() {
+  if (!sessao) return;
+
   if (lancamentos.length === 0) {
     alert("Nao ha lancamentos para salvar no backup.");
     return;
   }
 
+  const conta = lerContas()[sessao.idConta];
+  if (!conta) return;
+
+  // Cifrado com a chave da sessao: so abre com a senha desta conta.
   const conteudo = JSON.stringify({
     sistema: "conta-em-dia",
-    versao: 1,
-    geradoEm: new Date().toISOString(),
-    lancamentos
-  }, null, 2);
+    versao: 2,
+    salt: conta.salt,
+    iteracoes: conta.iteracoes,
+    cofre: await cifrar(sessao.chave, lancamentos)
+  });
 
   const blob = new Blob([conteudo], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -1051,54 +1126,196 @@ function baixarBackup() {
   URL.revokeObjectURL(url);
 }
 
-function lancamentoEhValido(item) {
-  return item
-    && typeof item.id === "string"
-    && (item.tipo === "receita" || item.tipo === "despesa")
-    && /^\d{4}-\d{2}-\d{2}$/.test(String(item.data || ""));
+function dataEhReal(texto) {
+  if (typeof texto !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(texto)) return false;
+  const [ano, mes, dia] = texto.split("-").map(Number);
+  const data = new Date(ano, mes - 1, dia);
+  return data.getFullYear() === ano && data.getMonth() === mes - 1 && data.getDate() === dia;
 }
 
-function importarBackup(event) {
+function valorEhValido(valor) {
+  return typeof valor === "number" && Number.isFinite(valor) && valor >= 0;
+}
+
+function textoEhValido(valor, maximo, obrigatorio) {
+  if (valor === undefined || valor === null || valor === "") return !obrigatorio;
+  return typeof valor === "string" && valor.length <= maximo;
+}
+
+function lancamentoEhValido(item) {
+  if (!item || typeof item !== "object") return false;
+
+  const grupos = item.tipo === "receita" ? gruposReceita : gruposDespesa;
+
+  return typeof item.id === "string"
+    && /^[a-z0-9]+$/i.test(item.id)
+    && (item.tipo === "receita" || item.tipo === "despesa")
+    && grupos.includes(item.grupo)
+    && dataEhReal(item.data)
+    && textoEhValido(item.descricao, DESCRICAO_MAXIMA, true)
+    && textoEhValido(item.observacao, OBSERVACAO_MAXIMA, false)
+    && valorEhValido(item.previsto)
+    && valorEhValido(item.realizado);
+}
+
+function limparLancamentoImportado(item) {
+  // Monta um objeto novo so com os campos conhecidos, descartando qualquer extra do arquivo.
+  const [ano, mes] = item.data.split("-").map(Number);
+  const classificacao = item.tipo === "despesa"
+    ? (item.classificacao === "Variável" || item.classificacao === "Variavel" ? "Variável" : "Fixa")
+    : "";
+
+  return {
+    id: item.id,
+    tipo: item.tipo,
+    grupo: item.grupo,
+    descricao: item.descricao.trim(),
+    classificacao,
+    previsto: item.previsto,
+    realizado: item.realizado,
+    diferenca: item.realizado - item.previsto,
+    data: item.data,
+    mes,
+    ano,
+    observacao: (item.observacao || "").trim()
+  };
+}
+
+function pacoteProtegidoEhValido(conteudo) {
+  return typeof conteudo.salt === "string"
+    && Number.isInteger(conteudo.iteracoes)
+    && conteudo.iteracoes >= 100000
+    && conteudo.iteracoes <= 2000000
+    && conteudo.cofre
+    && typeof conteudo.cofre.iv === "string"
+    && typeof conteudo.cofre.dados === "string";
+}
+
+function pedirSenhaBackup(pacote) {
+  const dialog = document.getElementById("dialogSenhaBackup");
+  const form = document.getElementById("formSenhaBackup");
+  const campo = document.getElementById("senhaBackup");
+  const cancelar = document.getElementById("btnCancelarBackup");
+
+  return new Promise((resolve) => {
+    const encerrar = (resultado) => {
+      form.removeEventListener("submit", enviar);
+      cancelar.removeEventListener("click", aoCancelar);
+      dialog.removeEventListener("cancel", aoCancelar);
+      form.reset();
+      definirMensagemAuth("mensagemBackup", "");
+      if (dialog.open) dialog.close();
+      resolve(resultado);
+    };
+
+    const aoCancelar = (event) => {
+      event.preventDefault();
+      encerrar(null);
+    };
+
+    const enviar = async (event) => {
+      event.preventDefault();
+      travarFormulario(form, true);
+      definirMensagemAuth("mensagemBackup", "Abrindo backup...", "info");
+
+      try {
+        const chave = await derivarChave(campo.value, deBase64(pacote.salt), pacote.iteracoes);
+        encerrar(await decifrar(chave, pacote.cofre));
+      } catch (erro) {
+        definirMensagemAuth("mensagemBackup", "Senha incorreta.");
+        campo.select();
+      } finally {
+        travarFormulario(form, false);
+      }
+    };
+
+    form.addEventListener("submit", enviar);
+    cancelar.addEventListener("click", aoCancelar);
+    dialog.addEventListener("cancel", aoCancelar);
+    dialog.showModal();
+    campo.focus();
+  });
+}
+
+async function abrirBackupProtegido(conteudo) {
+  // Backup da propria conta abre direto com a chave da sessao.
+  try {
+    return await decifrar(sessao.chave, conteudo.cofre);
+  } catch (erro) {
+    return pedirSenhaBackup(conteudo);
+  }
+}
+
+function lerArquivoComoTexto(arquivo) {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(leitor.result);
+    leitor.onerror = () => reject(leitor.error);
+    leitor.readAsText(arquivo);
+  });
+}
+
+async function importarBackup(event) {
   const arquivo = event.target.files[0];
   event.target.value = "";
-  if (!arquivo) return;
+  if (!arquivo || !sessao) return;
 
-  const leitor = new FileReader();
+  if (arquivo.size > BACKUP_TAMANHO_MAXIMO) {
+    alert("Arquivo muito grande. O limite do backup e 5 MB.");
+    return;
+  }
 
-  leitor.onload = () => {
-    let recebidos;
+  let recebidos;
 
-    try {
-      const conteudo = JSON.parse(leitor.result);
-      recebidos = Array.isArray(conteudo) ? conteudo : conteudo.lancamentos;
-      if (!Array.isArray(recebidos)) throw new Error("Formato invalido");
-    } catch (erro) {
-      alert("Arquivo de backup invalido.");
-      return;
+  try {
+    const conteudo = JSON.parse(await lerArquivoComoTexto(arquivo));
+
+    if (Array.isArray(conteudo)) {
+      recebidos = conteudo;
+    } else if (conteudo && conteudo.sistema === "conta-em-dia" && conteudo.versao === 2) {
+      if (!pacoteProtegidoEhValido(conteudo)) throw new Error("Formato invalido");
+      recebidos = await abrirBackupProtegido(conteudo);
+      if (recebidos === null) return;
+    } else if (conteudo && Array.isArray(conteudo.lancamentos)) {
+      recebidos = conteudo.lancamentos;
     }
 
-    const validos = recebidos.filter(lancamentoEhValido);
-    const idsExistentes = new Set(lancamentos.map((item) => item.id));
-    const novos = validos
-      .filter((item) => !idsExistentes.has(item.id))
-      .map((item) => {
-        const [ano, mes] = item.data.split("-").map(Number);
-        return { ...item, previsto: Number(item.previsto) || 0, realizado: Number(item.realizado) || 0, mes, ano };
-      });
+    if (!Array.isArray(recebidos)) throw new Error("Formato invalido");
+  } catch (erro) {
+    if (!sessao) return;
+    alert("Arquivo de backup invalido.");
+    return;
+  }
 
-    if (novos.length === 0) {
-      alert("Nenhum lancamento novo encontrado no backup.");
-      return;
-    }
+  if (!sessao) return;
 
-    if (!confirm(`Adicionar ${novos.length} lancamento(s) do backup?`)) return;
+  if (recebidos.length > BACKUP_MAXIMO_LANCAMENTOS) {
+    alert(`O backup tem ${recebidos.length} lancamentos. O limite por arquivo e ${BACKUP_MAXIMO_LANCAMENTOS}.`);
+    return;
+  }
 
-    lancamentos = lancamentos.concat(novos);
-    salvarNoNavegador();
-    renderizarTudo();
-  };
+  const idsExistentes = new Set(lancamentos.map((item) => item.id));
+  const novos = [];
 
-  leitor.readAsText(arquivo);
+  recebidos.forEach((item) => {
+    if (!lancamentoEhValido(item) || idsExistentes.has(item.id)) return;
+    idsExistentes.add(item.id);
+    novos.push(limparLancamentoImportado(item));
+  });
+
+  const ignorados = recebidos.length - novos.length;
+
+  if (novos.length === 0) {
+    alert(`Nenhum lancamento importado. ${ignorados} ignorado(s) por serem invalidos ou repetidos.`);
+    return;
+  }
+
+  if (!confirm(`Adicionar ${novos.length} lancamento(s) do backup?`)) return;
+
+  lancamentos = lancamentos.concat(novos);
+  salvarNoNavegador();
+  renderizarTudo();
+  alert(`${novos.length} lancamento(s) importado(s) e ${ignorados} ignorado(s).`);
 }
 
 document.addEventListener("DOMContentLoaded", iniciarSistema);

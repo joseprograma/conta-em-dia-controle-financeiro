@@ -24,8 +24,8 @@
       </div>
 
       <div class="auth-tabs">
-        <button type="button" class="auth-tab active" id="tabEntrar" onclick="trocarAbaAuth('entrar')">Entrar</button>
-        <button type="button" class="auth-tab" id="tabCadastrar" onclick="trocarAbaAuth('cadastrar')">Criar acesso</button>
+        <button type="button" class="auth-tab active" id="tabEntrar">Entrar</button>
+        <button type="button" class="auth-tab" id="tabCadastrar">Criar acesso</button>
       </div>
 
       <form id="formEntrar" class="auth-form">
@@ -59,11 +59,14 @@
           <input type="password" id="senhaCadastroConfirmacao" placeholder="Repita a senha" autocomplete="new-password" />
         </div>
 
+        <div class="auth-alerta" role="alert">
+          <strong>Atenção:</strong> não existe recuperação de senha. Se esquecer a senha, limpar os dados do navegador ou trocar de aparelho, os lançamentos serão perdidos. Faça backup com frequência.
+        </div>
+
         <p class="auth-message" id="mensagemCadastro"></p>
         <button type="submit" class="btn btn-primary">Criar meu acesso</button>
       </form>
 
-      <p class="auth-note">Guarde bem sua senha: ela é a chave que protege seus dados e não pode ser recuperada. Use o botão "Baixar backup" para não perder seus lançamentos.</p>
     </div>
   </section>
 
@@ -96,7 +99,7 @@
         <strong>Dica do sistema</strong>
         <p>Registre o valor previsto e o valor realizado. A diferença será calculada automaticamente.</p>
       </div>
-      <button type="button" class="btn btn-light btn-logout" onclick="sairDoSistema()">Sair</button>
+      <button type="button" class="btn btn-light btn-logout" id="btnSair">Sair</button>
       </div>
     </aside>
 
@@ -115,7 +118,7 @@
           <label for="anoFiltro">Ano</label>
           <input type="number" id="anoFiltro" min="2024" max="2100" />
 
-          <button type="button" class="btn btn-primary" onclick="atualizarPeriodo()">Atualizar</button>
+          <button type="button" class="btn btn-primary" id="btnAtualizar">Atualizar</button>
         </div>
       </header>
 
@@ -214,7 +217,7 @@
             <p>Adicione ganhos ou gastos da família, comércio ou pessoa física.</p>
           </div>
 
-          <button type="button" class="btn btn-light" onclick="limparFormulario()">Limpar</button>
+          <button type="button" class="btn btn-light" id="btnLimpar">Limpar</button>
         </div>
 
         <form id="formLancamento" class="form-grid">
@@ -222,7 +225,7 @@
 
           <div class="form-group">
             <label for="tipo">Tipo</label>
-            <select id="tipo" required onchange="controlarCamposPorTipo()">
+            <select id="tipo" required>
               <option value="receita">Ganho / Receita</option>
               <option value="despesa">Gasto / Despesa</option>
             </select>
@@ -271,11 +274,11 @@
 
           <div class="form-actions full">
             <button type="submit" class="btn btn-primary">Salvar lançamento</button>
-            <button type="button" class="btn btn-secondary" onclick="exportarCSV()">Exportar CSV</button>
-            <button type="button" class="btn btn-secondary" onclick="baixarBackup()">Baixar backup</button>
-            <button type="button" class="btn btn-secondary" onclick="arquivoBackup.click()">Restaurar backup</button>
+            <button type="button" class="btn btn-secondary" id="btnExportarCsv">Exportar CSV</button>
+            <button type="button" class="btn btn-secondary" id="btnBaixarBackup">Baixar backup</button>
+            <button type="button" class="btn btn-secondary" id="btnRestaurarBackup">Restaurar backup</button>
             <input type="file" id="arquivoBackup" accept="application/json,.json" hidden />
-            <button type="button" class="btn btn-danger" onclick="apagarTudo()">Apagar tudo</button>
+            <button type="button" class="btn btn-danger" id="btnApagarTudo">Apagar tudo</button>
           </div>
         </form>
       </section>
@@ -354,6 +357,28 @@
       </section>
     </main>
   </div>
+
+  <dialog class="backup-dialog" id="dialogSenhaBackup">
+    <form id="formSenhaBackup" class="auth-form">
+      <div>
+        <span class="tag">Backup protegido</span>
+        <h3>Digite a senha do backup</h3>
+        <p>Use a senha da conta que gerou este arquivo.</p>
+      </div>
+
+      <div class="form-group">
+        <label for="senhaBackup">Senha</label>
+        <input type="password" id="senhaBackup" autocomplete="current-password" />
+      </div>
+
+      <p class="auth-message" id="mensagemBackup"></p>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Abrir backup</button>
+        <button type="button" class="btn btn-light" id="btnCancelarBackup">Cancelar</button>
+      </div>
+    </form>
+  </dialog>
 
   <script src="script.js"></script>
 </body>
